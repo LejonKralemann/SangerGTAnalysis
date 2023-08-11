@@ -1,0 +1,677 @@
+
+#load libraries and data
+```{r}
+library(tidyverse)
+library(openxlsx)
+library(ggtext)
+library(Biostrings)
+library(sangerseqR)
+library(reshape2)
+
+
+sites=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="gt_sites")
+dna_samples = read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="sangerseqno_dnasample")
+reftable=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="reference")
+primerinfo=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="primers")
+parentinfo=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="dnasample_parents")
+
+
+
+```
+
+```{r}
+#set options
+
+#set to TRUE for more stricter calling of genotypes
+strict=TRUE
+
+#ratio of GT to wt peak intensity
+GT_peak_ratio = 0.33
+
+#same, but for good/bad zone calling
+GT_peak_ratio_zones = 0.1
+
+#length of sequence to match to find the GT sites
+GT_fdr_len = 20
+
+#length of sequence to find good zones
+search_width = 30
+
+```
+
+
+
+```{r}
+#########################################################################################
+#find wt or GT bases in primary or secondary sequences
+############################################################################################
+
+
+#acquire the genome reference sequence
+refsequence=DNAString(reftable$Sequence[1])
+refsequence_RC = reverseComplement(refsequence)
+ref_len=nchar(as.character(refsequence))
+
+#make an empty dataframe
+Total_data = tibble(Name = NULL,
+                       Seq1 = NULL,
+                       Seq2 = NULL,
+                       SangerSeq = NULL,
+                       WTseq = NULL,
+                       GTseq = NULL)
+Total_zones = tibble(SangerSeqNo = NULL,
+                     good_zone_start = NULL,
+                     good_zone_end = NULL)
+
+files=list.files(pattern=".ab1$")
+
+for (j in files){
+
+#get the sanger sequencing data
+abif1 = readsangerseq(j)  
+
+#get clean ab1 name
+clean_ab1_name = str_replace(j, "_premix.ab1", "")
+clean_ab1_name_2 = str_replace(clean_ab1_name, ".ab1", "")
+
+#get the primer orientation info
+current_primer=as.character(dna_samples %>% filter(SangerSeqNo == clean_ab1_name_2) %>% select(PrimerName) )
+current_orientation=as.character(primerinfo %>% filter(PrimerName == current_primer) %>% select(Orientation))
+  
+#make an empty dataframe
+Subtotal_data = tibble(Name = NULL,
+                       Seq1 = NULL,
+                       Seq2 = NULL,
+                       SangerSeq = NULL,
+                       WTseq = NULL,
+                       GTseq = NULL)
+
+#get basecalls from the ab1 file, split in primary and secondary
+abifbasecalls = makeBaseCalls(abif1,ratio=GT_peak_ratio)
+abifbasecalls_zones = makeBaseCalls(abif1,ratio=GT_peak_ratio_zones)
+  
+#determine what alle is same as the ref and extract the primary and secondary sequences
+if (current_orientation == "FW"){
+hetseqalleles = try(setAllelePhase(abifbasecalls,refsequence,trim5=50,trim3=300), silent=TRUE)
+hetseqalleles_zones = try(setAllelePhase(abifbasecalls_zones,refsequence,trim5=50,trim3=300), silent=TRUE)
+}else{
+hetseqalleles = try(setAllelePhase(abifbasecalls,refsequence_RC,trim5=50,trim3=300), silent=TRUE)
+hetseqalleles_zones = try(setAllelePhase(abifbasecalls_zones,refsequence_RC,trim5=50,trim3=300), silent=TRUE)
+}
+
+#if sequence is really bad, program should skip it and move on
+if (inherits(hetseqalleles,'try-error') == TRUE | inherits(hetseqalleles_zones,'try-error') == TRUE){
+  next
+}
+
+PrimSeq = DNAString(hetseqalleles@primarySeq)
+SecSeq = DNAString(hetseqalleles@secondarySeq)
+#below gives an error because the check for error above is not for the zones object
+SecSeq_zones = DNAString(hetseqalleles_zones@secondarySeq)
+
+for (i in row.names(sites)){
+  #get info from table
+  Site_name = as.character(sites %>% filter(row.names(sites) %in% i) %>% select(Name))
+  Site_start = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Location))
+  GT_Seq =  as.character(sites %>% filter(row.names(sites) %in% i) %>% select(GT))
+  Site_width = nchar(GT_Seq)
+  Insertion = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Insertion))
+  
+  #Get the wt seq from the ref
+  if (current_orientation == "FW"){
+  WT_Seq = as.character(subseq(refsequence, start=Site_start, width=Site_width))
+  }else{
+    if (Insertion > 0){ 
+      WT_Seq = as.character(subseq(refsequence, start=(Site_start-Insertion), width=Site_width))
+    }else{
+      WT_Seq = as.character(subseq(refsequence, start=Site_start, width=Site_width))
+    }
+  }
+  
+  #get the sequence preceding the site of interest to match
+  if (current_orientation == "FW"){
+  SeqToSearch=subseq(refsequence, start=Site_start-GT_fdr_len, width=GT_fdr_len)
+  }else{
+  #search on the other side of the site of interest when using reverse sequencing primer
+  if (Insertion > 0){
+  SeqToSearch=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-(1+Insertion))+GT_fdr_len)), width=GT_fdr_len)
+  }else{
+  SeqToSearch=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-1)+GT_fdr_len)), width=GT_fdr_len)
+  }
+  }
+  
+
+  
+  #find the SeqToSearch in the primary and secondary calls
+  MatchPrim= matchPattern(SeqToSearch, PrimSeq, max.mismatch = 0)
+  MatchSec= matchPattern(SeqToSearch, SecSeq, max.mismatch = 0)
+  PositionAfterStartPrim = MatchPrim@ranges@start+(MatchPrim@ranges@width)
+  PositionAfterStartSec = MatchSec@ranges@start+(MatchSec@ranges@width)
+  
+  #get the sequences of the site of interest
+  #strict mode that looks for the sites in the primary and secondary sequences
+  if (strict==TRUE){
+  if(length(PositionAfterStartPrim) == 1){
+    if (current_orientation == "FW"){
+    Allele1Seq = as.character(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width ))
+    }else{
+    Allele1Seq = as.character(reverseComplement(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width )))
+    }
+  }else if(length(PositionAfterStartPrim) == 0){
+    Allele1Seq = "not found"
+  }else{
+    Allele1Seq = "ambiguous"
+  }
+  
+    if(length(PositionAfterStartSec) == 1){
+    if (current_orientation == "FW"){
+      Allele2Seq = as.character(subseq(SecSeq, start=PositionAfterStartSec, width=Site_width ))
+    }else{
+      Allele2Seq = as.character(reverseComplement(subseq(SecSeq, start=PositionAfterStartSec, width=Site_width )))}
+  }else if(length(PositionAfterStartSec) == 0){
+    Allele2Seq = "not found"
+  }else{
+    Allele2Seq = "ambiguous"
+  }}
+  #a lenient mode that only looks for the sites in the primary sequence
+  if (strict==FALSE){
+    if(length(PositionAfterStartPrim) == 1){
+    if (current_orientation == "FW"){
+    Allele1Seq = as.character(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width ))
+    Allele2Seq = as.character(subseq(SecSeq, start=PositionAfterStartPrim, width=Site_width ))
+    }else{
+    Allele1Seq = as.character(reverseComplement(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width )))
+    Allele2Seq = as.character(reverseComplement(subseq(SecSeq, start=PositionAfterStartPrim, width=Site_width )))
+    }
+  }else if(length(PositionAfterStartPrim) == 0){
+    Allele1Seq = "not found"
+    Allele2Seq = "not found"
+  }else{
+    Allele1Seq = "ambiguous"
+    Allele2Seq = "ambiguous"
+  }
+  }
+
+  #write it to an object
+  currentData = tibble(Name=Site_name, Seq1=Allele1Seq, Seq2=Allele2Seq) %>% 
+    mutate(WTseq = WT_Seq, 
+           GTseq = GT_Seq)
+  
+
+  
+  Subtotal_data = rbind(Subtotal_data, currentData)
+  
+}
+Subtotal_data_names = Subtotal_data %>% 
+    mutate(SangerSeqNo = clean_ab1_name_2)
+
+Total_data = rbind(Total_data, Subtotal_data_names)
+
+##########################################################################
+#find good/bad zones
+############################################################################
+
+  
+#for determining which area is the first matching area (in case of a large deletion)
+
+secseqlen=nchar(as.character(SecSeq_zones))
+number_of_bins=floor(secseqlen/search_width)
+rm(search_list)
+for (i in 1:number_of_bins){
+  search_seq = as.character(subseq(SecSeq_zones, ((search_width*(i-1))+1), ((search_width*(i-1))+search_width)))
+  if (exists("search_list")==TRUE){
+      search_list = c(search_list, search_seq)
+  }else{
+    search_list = search_seq
+  }
+}
+search_list_df = data.frame(search_list)
+
+#match windows across the entire sequence to determine where the sequence is simple and where multiple sequences are going through each other. Match the secondary sequence, because if this one is like the ref, it means there is no mix of sequences. 
+rm(set_start_good, set_end_good, last_good_end)
+
+    for (k in row.names(search_list_df)){
+if (current_orientation == "FW"){
+      MatchPrim = matchPattern(search_list_df[[k,1]], refsequence, max.mismatch = 3)
+}else{
+  MatchPrim = matchPattern(search_list_df[[k,1]], refsequence_RC, max.mismatch = 3)
+}
+      Match_start = MatchPrim@ranges@start
+      Match_end = Match_start+MatchPrim@ranges@width-1
+
+      if (length(Match_start) > 0 & exists("set_start_good")==FALSE){
+        set_start_good = Match_start
+        last_good_end = Match_end
+      }else if (length(Match_start) > 0 & exists("set_start_good")==TRUE){
+        last_good_end = Match_end
+      }else if (length(Match_start) == 0 & exists("set_start_good") == TRUE){
+        set_end_good = last_good_end
+        break
+      }
+    }
+
+#combine the zone data with the rest
+
+if (exists("set_start_good")==TRUE){
+  if (current_orientation == "FW"){
+  Sanger_zones = tibble(SangerSeqNo = clean_ab1_name_2,
+                               good_zone_start = set_start_good,
+                               good_zone_end = set_end_good)
+
+  }else{
+    Sanger_zones = tibble(SangerSeqNo = clean_ab1_name_2,
+                                 good_zone_start = ref_len - (set_end_good-1),
+                                 good_zone_end = ref_len - (set_start_good-1))
+
+  }
+  
+}else{
+  
+  Sanger_zones = tibble(SangerSeqNo = clean_ab1_name_2,
+                                 good_zone_start = 99999999,
+                                 good_zone_end = 99999999)
+}
+  
+Total_zones = rbind(Total_zones, Sanger_zones)
+  
+  
+}
+#############################################################################################
+#interpreting the outcomes
+###############################################################################################
+Total_data_interp = Total_data %>% mutate(Genotype = case_when(
+  Seq1 == WTseq & Seq2 == WTseq ~ "wt",
+  Seq1 == WTseq & Seq2 == GTseq ~ "GT het",
+  Seq1 == GTseq & Seq2 == GTseq ~ "GT hom",
+  Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
+  TRUE ~ "mutated")) %>%
+  mutate(Strict = strict)
+  
+  Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype)
+  Total_trans = spread(Data_clean, Name, Genotype)
+  Total_trans_zones = left_join(Total_trans, Total_zones, by="SangerSeqNo")
+  
+  #correcting the interpretation to account for big deletions that remove part of one of the 2 chromosomes, and therefore only give information about one 
+  if (exists("total_site_table_reinterpreted")){ 
+  rm(total_site_table_reinterpreted)}
+  
+  for (i in row.names(sites)){
+    Site_name = as.character(sites %>% filter(row.names(sites) %in% i) %>% select(Name))
+    Site_start = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Location))
+    GT_Seq =  as.character(sites %>% filter(row.names(sites) %in% i) %>% select(GT))
+    Site_width = nchar(GT_Seq)
+    total_sites = nrow(sites)
+    Total_trans_zones[,as.integer(i)+1]
+  
+  current_site_table = data.frame(SangerSeqNo = Total_trans_zones[,1], 
+                                  Site_name = Total_trans_zones[,as.integer(i)+1], 
+                                  good_zone_start = Total_trans_zones[, total_sites+2], 
+                                  good_zone_end = Total_trans_zones[, total_sites+3])
+ if (exists("current_site_table_reinterpreted")){
+  rm(current_site_table_reinterpreted)}
+  
+  for (j in row.names(current_site_table)) {
+    
+    SangerSeqNo_current = as.character(current_site_table %>% filter(row.names(current_site_table) %in% j) %>% select(SangerSeqNo))
+    
+    #if the site is outside of the "good" window and the called outcome is "wt", call as wt/GT het because the other one could be targeted
+    if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]) &
+        current_site_table[[j, 2]] == "wt")
+        {
+          reinterpreted = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name" = "wt/GT het")
+        #if the site is outside, and the called outcome is "GT hom", then call is GT hom/het because the other one could be wt
+          } else if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]) &
+                   current_site_table[[j, 2]] == "GT hom")
+                   {
+                     reinterpreted = data.frame("SangerSeqNo" = SangerSeqNo_current, 
+                                                "temp_site_name" = "GT hom/GT het")
+      
+            #if GT het or mutated or undetermined, keep the calling
+                   } else{
+                     reinterpreted = data.frame("SangerSeqNo" = SangerSeqNo_current, 
+                                                "temp_site_name" = current_site_table[[j, 2]])
+                   }
+    names(reinterpreted)=c("SangerSeqNo", Site_name)
+      if (exists("current_site_table_reinterpreted")==TRUE){
+  current_site_table_reinterpreted = rbind(current_site_table_reinterpreted, reinterpreted)
+  }else{
+    current_site_table_reinterpreted = reinterpreted
+  }
+  }
+if (exists("total_site_table_reinterpreted")==TRUE){
+  total_site_table_reinterpreted = left_join(total_site_table_reinterpreted, current_site_table_reinterpreted, by="SangerSeqNo")
+}else{
+  total_site_table_reinterpreted = current_site_table_reinterpreted
+}
+  
+  }
+
+  Total_trans_samples = merge(total_site_table_reinterpreted, dna_samples, by="SangerSeqNo")  
+  Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
+  
+#####################################################################################################  
+#then show the data per sample  
+#give preference to GT het, GT hom and wt over undetermined/mutated. Mutated over undetermined. If multiples of gt het, hom or wt are present on a spot, take what the majority say (and if there are only 2, I should sequence more)
+#########################################################################################################
+
+if (exists("Total_ultimate")){
+rm(Total_ultimate)}
+Total_seq_rxns = Total_trans_parents %>% group_by(DNASample) %>% summarize(count_reactions = n())
+Site_names = pull(sites, Name)
+
+
+for (i in row.names(Total_seq_rxns)) {
+  Total_consensus = Total_seq_rxns %>% filter(row.names(Total_seq_rxns) %in% i) %>% select(DNASample)
+  Sample_name = as.character(Total_consensus)
+  
+  for (j in row.names(sites)) {
+    Site_name = as.character(sites %>% filter(row.names(sites) %in% j) %>% select(Name))
+    
+    Subset_working = Total_trans_parents %>%
+      select(DNASample, SangerSeqNo, {{Site_name}}) %>%
+      filter(DNASample == Sample_name) %>%
+      group_by(across(c(-SangerSeqNo))) %>%
+      summarize(no_observations = n()) %>%
+      arrange(desc(no_observations))
+    
+    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "mutated")
+    
+    #if all are undetermined or mutated make this the final outcome
+    if (nrow(Subset_working_2) == 0) {
+      Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined/mutated")
+      names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+    #if there are good outcomes
+      } else{
+        #if there are multiple different outcomes
+      if (nrow(Subset_working_2) > 1) {
+        Top_hit = slice_head(Subset_working_2, n = 1)
+        Top_hit_number = Top_hit$no_observations
+        
+        Second_hit = slice_head(Subset_working_2, n = 2) %>% slice_tail(n = 1)
+        Second_hit_number = Second_hit$no_observations
+        
+        #there is still a problem below, it can be that one reaction (one orientation) does not give the correct answer. And if I did 2 reactions from 1 side, and 1 reaction from the other, there will be a bias. It then should not matter how often a certain outcome is found...
+        
+        #if the first and second most outcomes are tied, determine what kind of combinatory outcome to output
+        if (Top_hit_number == Second_hit_number) {
+          #a mix of wt or wt/GT het and GT het or wt/GT het
+          if ((Top_hit[[1,2]] == "wt/GT het" & Second_hit[[1,2]] == "GT het" ) |
+            (Top_hit[[1,2]] == "GT het" & Second_hit[[1,2]] == "wt/GT het")){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/GT het")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+            
+            #a mix of wt/GT het and GT het
+            }else if ((Top_hit[[1,2]] == "wt/GT het" & Second_hit[[1,2]] == "GT het") |
+            (Top_hit[[1,2]] == "GT het" & Second_hit[[1,2]] == "wt/GT het")){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+            
+            #a mix of wt and wt/GT het
+            }else if ((Top_hit[[1,2]] == "wt" & Second_hit[[1,2]] == "wt/GT het") |
+            (Top_hit[[1,2]] == "wt/GT het" & Second_hit[[1,2]] == "wt")){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+            
+            #a mix of wt and GT hom
+            }else if ((Top_hit[[1,2]] == "wt" & Second_hit[[1,2]] == "GT hom") |
+            (Top_hit[[1,2]] == "GT hom" & Second_hit[[1,2]] == "wt")){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/GT hom")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          
+            #a mix of wt/GT het and GT hom or GT hom/GT het
+            }else if ((Top_hit[[1,2]] == "wt/GT het" & (Second_hit[[1,2]] == "GT hom" | Second_hit[[1,2]] == "GT hom/GT het")) |
+            ((Top_hit[[1,2]] == "GT hom" | Top_hit[[1,2]] == "GT hom/GT het") & Second_hit[[1,2]] == "wt/ GT het")){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/GT het/GT hom")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          
+            #a mix of GT hom and GT het and GT hom/GT het
+            } else{
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT hom/GT het")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+            }
+          #if there is one outcome with more observations then the runner up, make that the final outcome
+        } else{
+          Consensus = Top_hit %>% select(-no_observations)
+        }
+        #if there is just 1 outcome, make that the final outcome
+      } else{
+        Consensus = Subset_working_2 %>% select(-no_observations)
+      }
+      
+    }
+    
+    Total_consensus = left_join(Total_consensus, Consensus, by = "DNASample")
+  }
+  if (exists("Total_ultimate") == TRUE) {
+    Total_ultimate = rbind(Total_ultimate, Total_consensus)
+  } else{
+    Total_ultimate = Total_consensus
+  }
+  
+  
+}
+
+Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = "DNASample")
+
+  
+  #write everything into an excel document
+work_book <- createWorkbook()
+addWorksheet(work_book, "Data_detailed")
+writeData(work_book, sheet = 1, Total_data_interp)
+addWorksheet(work_book, "Data_compact")
+writeData(work_book, sheet = 2, Total_trans_parents)
+addWorksheet(work_book, "Data_summary")
+writeData(work_book, sheet = 3, Total_ultimate_parents)
+
+saveWorkbook(work_book, file = "SangerSeqAnalysis.xlsx", overwrite=TRUE)
+
+
+  
+  
+```  
+
+#write to excel
+```{r}
+#write everything into an excel document
+work_book <- createWorkbook()
+addWorksheet(work_book, "Data_detailed")
+writeData(work_book, sheet = 1, Total_data_interp)
+addWorksheet(work_book, "Data_compact")
+writeData(work_book, sheet = 2, Total_trans_parents)
+addWorksheet(work_book, "Data_summary")
+writeData(work_book, sheet = 3, Total_ultimate_parents)
+
+saveWorkbook(work_book, file = "SangerSeqAnalysis.xlsx", overwrite=TRUE)
+
+
+```
+
+  
+  
+#this can go
+```{r}  
+  
+  
+  #temp file reading
+  Total_trans=read.xlsx("SangerSeqAnalysis.xlsx", sheet="Data_compact") %>% left_join(primerinfo) %>% filter(Orientation == "FW") %>% select(SangerSeqNo, Site_1, Site_2, Site_3, Site_4, Site_5, Site_6)
+
+  #correct the interpretation. When you go from determined to undetermined, back to determined, it means there was likely a deletion, and you have reached the end of one of the two sequences. The second stretch of determined sites can no longer be assigned GT het or GT hom, but should be assigned GT. 
+  
+  #fw reactions:
+  rm(Total_corrected)
+  for (i in row.names(Total_trans)){
+   Sanger_seq_name = as.character(Total_trans %>% filter(row.names(Total_trans) %in% i) %>% select(SangerSeqNo)) 
+   Current_row = Total_trans %>% filter(SangerSeqNo == Sanger_seq_name) %>% select(-SangerSeqNo)
+   call_zone = FALSE #when calling as determined
+   second_garbage = FALSE #when calling as undetermined, but not at the beginning of the sequence
+   rm(current_row_corrected)
+   
+    for (j in colnames(Current_row)){
+      current_field = Current_row[[1,j]]
+      if (current_field != "undetermined" & current_field != "mutated" & second_garbage == FALSE){
+        call_zone = TRUE
+        current_call = current_field
+      }else if (call_zone == TRUE){
+        second_garbage = TRUE
+        call_zone = FALSE
+        current_call = current_field
+      }else if (current_field == "GT hom" | current_field == "GT het"){
+          current_call = "GT hom/het"
+      }else if (current_field == "wt"){
+        current_call = "wt/GT het"
+      }else{
+          current_call = "undetermined"
+      }
+      if (exists("current_row_corrected")==TRUE){
+        current_row_corrected = c(current_row_corrected, current_call)
+      }else{
+        current_row_corrected = current_call
+      }
+    }
+   current_row_corrected_name = c(Sanger_seq_name, current_row_corrected)
+   
+   if (exists("Total_corrected")==TRUE){
+   Total_corrected = rbind(Total_corrected, current_row_corrected_name)
+   
+   }else{
+     Total_corrected = current_row_corrected_name
+   }
+  }
+  
+    Total_trans=read.xlsx("SangerSeqAnalysis.xlsx", sheet="Data_compact") %>% left_join(primerinfo) %>% filter(Orientation == "RV") %>% select(SangerSeqNo, Site_1, Site_2, Site_3, Site_4, Site_5, Site_6)
+  
+  #reverse reactions:
+    rm(Total_corrected)
+  for (i in row.names(Total_trans)){
+   Sanger_seq_name = as.character(Total_trans %>% filter(row.names(Total_trans) %in% i) %>% select(SangerSeqNo)) 
+   Current_row = Total_trans %>% filter(SangerSeqNo == Sanger_seq_name) %>% select(-SangerSeqNo)
+   call_zone = FALSE #when calling as determined
+   second_garbage = FALSE #when calling as undetermined, but not at the beginning of the sequence
+   rm(current_row_corrected)
+   
+    for (j in colnames(Current_row)){
+      current_field = Current_row[[1,j]]
+      if (current_field != "undetermined" & current_field != "mutated" & second_garbage == FALSE){
+        call_zone = TRUE
+        current_call = current_field
+      }else if (call_zone == TRUE){
+        second_garbage = TRUE
+        call_zone = FALSE
+        current_call = current_field
+      }else if (current_field == "GT hom" | current_field == "GT het"){
+          current_call = "GT hom/het"
+      }else if (current_field == "wt"){
+        current_call = "wt/GT het"
+      }else{
+          current_call = "undetermined"
+      }
+      if (exists("current_row_corrected")==TRUE){
+        current_row_corrected = c(current_row_corrected, current_call)
+      }else{
+        current_row_corrected = current_call
+      }
+    }
+   current_row_corrected_name = c(Sanger_seq_name, current_row_corrected)
+   
+   if (exists("Total_corrected")==TRUE){
+   Total_corrected = rbind(Total_corrected, current_row_corrected_name)
+   
+   }else{
+     Total_corrected = current_row_corrected_name
+   }
+  }
+  
+
+  
+
+  Total_trans_samples = merge(Total_trans, dna_samples, by="SangerSeqNo")  
+  Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")
+  
+
+  
+  
+
+
+  
+  
+  
+
+
+
+
+```
+
+#combine the data from different reactions
+```{r}
+#give preference to GT het, GT hom and wt over undetermined/mutated. Mutated over undetermined. If multiples of gt het, hom or wt are present on a spot, take what the majority say (and if there are only 2, I should sequence more)
+
+rm(Total_ultimate)
+Total_seq_rxns = Total_trans_parents %>% group_by(DNASample) %>% summarize(count_reactions = n())
+Site_names = pull(sites, Name)
+
+
+for (i in row.names(Total_seq_rxns)) {
+  Total_consensus = Total_seq_rxns %>% filter(row.names(Total_seq_rxns) %in% i) %>% select(DNASample)
+  Sample_name = as.character(Total_consensus)
+  
+  for (j in row.names(sites)) {
+    Site_name = as.character(sites %>% filter(row.names(sites) %in% j) %>% select(Name))
+    
+    Subset_working = Total_trans_parents %>%
+      select(DNASample, SangerSeqNo, {{Site_name}}) %>%
+      filter(DNASample == Sample_name) %>%
+      group_by(across(c(-SangerSeqNo))) %>%
+      summarize(no_observations = n()) %>%
+      arrange(desc(no_observations))
+    
+    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "mutated")
+    
+    if (nrow(Subset_working_2) == 0) {
+      Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined/mutated")
+      names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+    } else{
+      if (nrow(Subset_working_2) > 1) {
+        Top_hit = slice_head(Subset_working_2, n = 1)
+        Top_hit_number = Top_hit$no_observations
+        
+        Second_hit = slice_head(Subset_working_2, n = 2) %>% slice_tail(n = 1)
+        Second_hit_number = Second_hit$no_observations
+        
+        if (Top_hit_number == Second_hit_number) {
+          #if one of the two is "GT"
+          if (Top_hit[[1,2]] == "") {
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "conflict")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+            
+          } else{
+            #it becomes either GT hom or GT het
+          }
+        } else{
+          Consensus = Top_hit %>% select(-no_observations)
+        }
+      } else{
+        Consensus = Subset_working_2 %>% select(-no_observations)
+      }
+      
+    }
+    
+    Total_consensus = left_join(Total_consensus, Consensus, by = "DNASample")
+  }
+  if (exists("Total_ultimate") == TRUE) {
+    Total_ultimate = rbind(Total_ultimate, Total_consensus)
+  } else{
+    Total_ultimate = Total_consensus
+  }
+  
+  
+}
+
+Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = "DNASample")
+
+
+
+
+```
+
+
+
