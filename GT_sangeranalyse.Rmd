@@ -1,6 +1,7 @@
 
 #load libraries and data
 ```{r}
+#load packages
 library(tidyverse)
 library(openxlsx)
 library(ggtext)
@@ -8,15 +9,16 @@ library(Biostrings)
 library(sangerseqR)
 library(reshape2)
 
+#set paths
+input_dir= "./input/"
+output_dir= "./output/"
 
-sites=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="gt_sites")
-dna_samples = read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="sangerseqno_dnasample")
-reftable=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="reference")
-primerinfo=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="primers")
-parentinfo=read.xlsx("sanger_analysis_input/SangerAnalysisInput.xlsx", sheet="dnasample_parents")
-
-
-
+#read metadata
+sites=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="gt_sites"))
+dna_samples = read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="sangerseqno_dnasample"))
+reftable=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="reference"))
+primerinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="primers"))
+parentinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="dnasample_parents"))
 ```
 
 ```{r}
@@ -36,10 +38,7 @@ GT_fdr_len = 20
 
 #length of sequence to find good zones
 search_width = 30
-
 ```
-
-
 
 ```{r}
 #########################################################################################
@@ -63,12 +62,12 @@ Total_zones = tibble(SangerSeqNo = NULL,
                      good_zone_start = NULL,
                      good_zone_end = NULL)
 
-files=list.files(pattern=".ab1$")
+files=list.files(path=input_dir, pattern=".ab1$")
 
 for (j in files){
 
 #get the sanger sequencing data
-abif1 = readsangerseq(j)  
+abif1 = readsangerseq(paste0(input_dir, j))  
 
 #get clean ab1 name
 clean_ab1_name = str_replace(j, "_premix.ab1", "")
@@ -463,215 +462,12 @@ writeData(work_book, sheet = 2, Total_trans_parents)
 addWorksheet(work_book, "Data_summary")
 writeData(work_book, sheet = 3, Total_ultimate_parents)
 
-saveWorkbook(work_book, file = "SangerSeqAnalysis.xlsx", overwrite=TRUE)
+saveWorkbook(work_book, file = paste0(input_dir, "SangerSeqAnalysis.xlsx"), overwrite=TRUE)
 
 
   
   
 ```  
-
-#write to excel
-```{r}
-#write everything into an excel document
-work_book <- createWorkbook()
-addWorksheet(work_book, "Data_detailed")
-writeData(work_book, sheet = 1, Total_data_interp)
-addWorksheet(work_book, "Data_compact")
-writeData(work_book, sheet = 2, Total_trans_parents)
-addWorksheet(work_book, "Data_summary")
-writeData(work_book, sheet = 3, Total_ultimate_parents)
-
-saveWorkbook(work_book, file = "SangerSeqAnalysis.xlsx", overwrite=TRUE)
-
-
-```
-
-  
-  
-#this can go
-```{r}  
-  
-  
-  #temp file reading
-  Total_trans=read.xlsx("SangerSeqAnalysis.xlsx", sheet="Data_compact") %>% left_join(primerinfo) %>% filter(Orientation == "FW") %>% select(SangerSeqNo, Site_1, Site_2, Site_3, Site_4, Site_5, Site_6)
-
-  #correct the interpretation. When you go from determined to undetermined, back to determined, it means there was likely a deletion, and you have reached the end of one of the two sequences. The second stretch of determined sites can no longer be assigned GT het or GT hom, but should be assigned GT. 
-  
-  #fw reactions:
-  rm(Total_corrected)
-  for (i in row.names(Total_trans)){
-   Sanger_seq_name = as.character(Total_trans %>% filter(row.names(Total_trans) %in% i) %>% select(SangerSeqNo)) 
-   Current_row = Total_trans %>% filter(SangerSeqNo == Sanger_seq_name) %>% select(-SangerSeqNo)
-   call_zone = FALSE #when calling as determined
-   second_garbage = FALSE #when calling as undetermined, but not at the beginning of the sequence
-   rm(current_row_corrected)
-   
-    for (j in colnames(Current_row)){
-      current_field = Current_row[[1,j]]
-      if (current_field != "undetermined" & current_field != "mutated" & second_garbage == FALSE){
-        call_zone = TRUE
-        current_call = current_field
-      }else if (call_zone == TRUE){
-        second_garbage = TRUE
-        call_zone = FALSE
-        current_call = current_field
-      }else if (current_field == "GT hom" | current_field == "GT het"){
-          current_call = "GT hom/het"
-      }else if (current_field == "wt"){
-        current_call = "wt/GT het"
-      }else{
-          current_call = "undetermined"
-      }
-      if (exists("current_row_corrected")==TRUE){
-        current_row_corrected = c(current_row_corrected, current_call)
-      }else{
-        current_row_corrected = current_call
-      }
-    }
-   current_row_corrected_name = c(Sanger_seq_name, current_row_corrected)
-   
-   if (exists("Total_corrected")==TRUE){
-   Total_corrected = rbind(Total_corrected, current_row_corrected_name)
-   
-   }else{
-     Total_corrected = current_row_corrected_name
-   }
-  }
-  
-    Total_trans=read.xlsx("SangerSeqAnalysis.xlsx", sheet="Data_compact") %>% left_join(primerinfo) %>% filter(Orientation == "RV") %>% select(SangerSeqNo, Site_1, Site_2, Site_3, Site_4, Site_5, Site_6)
-  
-  #reverse reactions:
-    rm(Total_corrected)
-  for (i in row.names(Total_trans)){
-   Sanger_seq_name = as.character(Total_trans %>% filter(row.names(Total_trans) %in% i) %>% select(SangerSeqNo)) 
-   Current_row = Total_trans %>% filter(SangerSeqNo == Sanger_seq_name) %>% select(-SangerSeqNo)
-   call_zone = FALSE #when calling as determined
-   second_garbage = FALSE #when calling as undetermined, but not at the beginning of the sequence
-   rm(current_row_corrected)
-   
-    for (j in colnames(Current_row)){
-      current_field = Current_row[[1,j]]
-      if (current_field != "undetermined" & current_field != "mutated" & second_garbage == FALSE){
-        call_zone = TRUE
-        current_call = current_field
-      }else if (call_zone == TRUE){
-        second_garbage = TRUE
-        call_zone = FALSE
-        current_call = current_field
-      }else if (current_field == "GT hom" | current_field == "GT het"){
-          current_call = "GT hom/het"
-      }else if (current_field == "wt"){
-        current_call = "wt/GT het"
-      }else{
-          current_call = "undetermined"
-      }
-      if (exists("current_row_corrected")==TRUE){
-        current_row_corrected = c(current_row_corrected, current_call)
-      }else{
-        current_row_corrected = current_call
-      }
-    }
-   current_row_corrected_name = c(Sanger_seq_name, current_row_corrected)
-   
-   if (exists("Total_corrected")==TRUE){
-   Total_corrected = rbind(Total_corrected, current_row_corrected_name)
-   
-   }else{
-     Total_corrected = current_row_corrected_name
-   }
-  }
-  
-
-  
-
-  Total_trans_samples = merge(Total_trans, dna_samples, by="SangerSeqNo")  
-  Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")
-  
-
-  
-  
-
-
-  
-  
-  
-
-
-
-
-```
-
-#combine the data from different reactions
-```{r}
-#give preference to GT het, GT hom and wt over undetermined/mutated. Mutated over undetermined. If multiples of gt het, hom or wt are present on a spot, take what the majority say (and if there are only 2, I should sequence more)
-
-rm(Total_ultimate)
-Total_seq_rxns = Total_trans_parents %>% group_by(DNASample) %>% summarize(count_reactions = n())
-Site_names = pull(sites, Name)
-
-
-for (i in row.names(Total_seq_rxns)) {
-  Total_consensus = Total_seq_rxns %>% filter(row.names(Total_seq_rxns) %in% i) %>% select(DNASample)
-  Sample_name = as.character(Total_consensus)
-  
-  for (j in row.names(sites)) {
-    Site_name = as.character(sites %>% filter(row.names(sites) %in% j) %>% select(Name))
-    
-    Subset_working = Total_trans_parents %>%
-      select(DNASample, SangerSeqNo, {{Site_name}}) %>%
-      filter(DNASample == Sample_name) %>%
-      group_by(across(c(-SangerSeqNo))) %>%
-      summarize(no_observations = n()) %>%
-      arrange(desc(no_observations))
-    
-    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "mutated")
-    
-    if (nrow(Subset_working_2) == 0) {
-      Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined/mutated")
-      names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-    } else{
-      if (nrow(Subset_working_2) > 1) {
-        Top_hit = slice_head(Subset_working_2, n = 1)
-        Top_hit_number = Top_hit$no_observations
-        
-        Second_hit = slice_head(Subset_working_2, n = 2) %>% slice_tail(n = 1)
-        Second_hit_number = Second_hit$no_observations
-        
-        if (Top_hit_number == Second_hit_number) {
-          #if one of the two is "GT"
-          if (Top_hit[[1,2]] == "") {
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "conflict")
-            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-            
-          } else{
-            #it becomes either GT hom or GT het
-          }
-        } else{
-          Consensus = Top_hit %>% select(-no_observations)
-        }
-      } else{
-        Consensus = Subset_working_2 %>% select(-no_observations)
-      }
-      
-    }
-    
-    Total_consensus = left_join(Total_consensus, Consensus, by = "DNASample")
-  }
-  if (exists("Total_ultimate") == TRUE) {
-    Total_ultimate = rbind(Total_ultimate, Total_consensus)
-  } else{
-    Total_ultimate = Total_consensus
-  }
-  
-  
-}
-
-Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = "DNASample")
-
-
-
-
-```
 
 
 
