@@ -14,11 +14,11 @@ input_dir= "./input/"
 output_dir= "./output/"
 
 #read metadata
-sites=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="gt_sites"))
-dna_samples = read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="sangerseqno_dnasample"))
-reftable=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="reference"))
-primerinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="primers"))
-parentinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx", sheet="dnasample_parents"))
+sites=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="gt_sites")
+dna_samples = read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="sangerseqno_dnasample")
+reftable=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="reference")
+primerinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="primers")
+parentinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="dnasample_parents")
 ```
 
 ```{r}
@@ -215,7 +215,8 @@ Total_data = rbind(Total_data, Subtotal_data_names)
 
 secseqlen=nchar(as.character(SecSeq_zones))
 number_of_bins=floor(secseqlen/search_width)
-rm(search_list)
+if (exists("search_list")){
+rm(search_list)}
 for (i in 1:number_of_bins){
   search_seq = as.character(subseq(SecSeq_zones, ((search_width*(i-1))+1), ((search_width*(i-1))+search_width)))
   if (exists("search_list")==TRUE){
@@ -227,8 +228,13 @@ for (i in 1:number_of_bins){
 search_list_df = data.frame(search_list)
 
 #match windows across the entire sequence to determine where the sequence is simple and where multiple sequences are going through each other. Match the secondary sequence, because if this one is like the ref, it means there is no mix of sequences. 
-rm(set_start_good, set_end_good, last_good_end)
-
+if (exists("set_start_good")){
+  rm(set_start_good)}
+if (exists("set_end_good")){
+  rm(set_end_good)}
+if (exists("last_good_end")){
+  rm(last_good_end)}  
+  
     for (k in row.names(search_list_df)){
 if (current_orientation == "FW"){
       MatchPrim = matchPattern(search_list_df[[k,1]], refsequence, max.mismatch = 3)
@@ -278,6 +284,8 @@ Total_zones = rbind(Total_zones, Sanger_zones)
 #############################################################################################
 #interpreting the outcomes
 ###############################################################################################
+
+#basic interpretation
 Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   Seq1 == WTseq & Seq2 == WTseq ~ "wt",
   Seq1 == WTseq & Seq2 == GTseq ~ "GT het",
@@ -287,12 +295,14 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   mutate(Strict = strict)
   
   Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype)
+  #Change the format of the data
   Total_trans = spread(Data_clean, Name, Genotype)
+  #add zone info
   Total_trans_zones = left_join(Total_trans, Total_zones, by="SangerSeqNo")
   
-  #correcting the interpretation to account for big deletions that remove part of one of the 2 chromosomes, and therefore only give information about one 
-  if (exists("total_site_table_reinterpreted")){ 
-  rm(total_site_table_reinterpreted)}
+  #add a column that indicates when an interpretation is not certain (i.e. that only 1 of the two alleles has been called)
+  if (exists("total_site_table_InterPretCaution")){ 
+  rm(total_site_table_InterPretCaution)}
   
   for (i in row.names(sites)){
     Site_name = as.character(sites %>% filter(row.names(sites) %in% i) %>% select(Name))
@@ -306,51 +316,40 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
                                   Site_name = Total_trans_zones[,as.integer(i)+1], 
                                   good_zone_start = Total_trans_zones[, total_sites+2], 
                                   good_zone_end = Total_trans_zones[, total_sites+3])
- if (exists("current_site_table_reinterpreted")){
-  rm(current_site_table_reinterpreted)}
+ if (exists("current_site_table_InterPretCaution")){
+  rm(current_site_table_InterPretCaution)}
   
   for (j in row.names(current_site_table)) {
     
     SangerSeqNo_current = as.character(current_site_table %>% filter(row.names(current_site_table) %in% j) %>% select(SangerSeqNo))
     
-    #if the site is outside of the "good" window and the called outcome is "wt", call as wt/GT het because the other one could be targeted
-    if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]) &
-        current_site_table[[j, 2]] == "wt")
+    #if the site is outside of the "good" window 
+    if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]))
         {
-          reinterpreted = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name" = "wt/GT het")
-        #if the site is outside, and the called outcome is "GT hom", then call is GT hom/het because the other one could be wt
-          } else if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]) &
-                   current_site_table[[j, 2]] == "GT hom")
-                   {
-                     reinterpreted = data.frame("SangerSeqNo" = SangerSeqNo_current, 
-                                                "temp_site_name" = "GT hom/GT het")
-      
-            #if GT het or mutated or undetermined, keep the calling
-                   } else{
-                     reinterpreted = data.frame("SangerSeqNo" = SangerSeqNo_current, 
-                                                "temp_site_name" = current_site_table[[j, 2]])
-                   }
-    names(reinterpreted)=c("SangerSeqNo", Site_name)
-      if (exists("current_site_table_reinterpreted")==TRUE){
-  current_site_table_reinterpreted = rbind(current_site_table_reinterpreted, reinterpreted)
+          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"=current_site_table[[j, 2]], "Caution" = TRUE)
+        } else{
+          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"=current_site_table[[j, 2]], "Caution" = FALSE)}
+    names(InterPretCaution)=c("SangerSeqNo", Site_name, paste0(Site_name, ".caution"))
+      if (exists("current_site_table_InterPretCaution")==TRUE){
+  current_site_table_InterPretCaution = rbind(current_site_table_InterPretCaution, InterPretCaution)
   }else{
-    current_site_table_reinterpreted = reinterpreted
+    current_site_table_InterPretCaution = InterPretCaution
   }
   }
-if (exists("total_site_table_reinterpreted")==TRUE){
-  total_site_table_reinterpreted = left_join(total_site_table_reinterpreted, current_site_table_reinterpreted, by="SangerSeqNo")
+if (exists("total_site_table_InterPretCaution")==TRUE){
+  total_site_table_InterPretCaution = left_join(total_site_table_InterPretCaution, current_site_table_InterPretCaution, by="SangerSeqNo")
 }else{
-  total_site_table_reinterpreted = current_site_table_reinterpreted
+  total_site_table_InterPretCaution = current_site_table_InterPretCaution
 }
   
   }
 
-  Total_trans_samples = merge(total_site_table_reinterpreted, dna_samples, by="SangerSeqNo")  
+  Total_trans_samples = merge(total_site_table_InterPretCaution, dna_samples, by="SangerSeqNo")  
   Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
   
 #####################################################################################################  
 #then show the data per sample  
-#give preference to GT het, GT hom and wt over undetermined/mutated. Mutated over undetermined. If multiples of gt het, hom or wt are present on a spot, take what the majority say (and if there are only 2, I should sequence more)
+#determine what the outcome should be when not all sequences agree. Give priority to those that are site_name.caution==FALSE
 #########################################################################################################
 
 if (exists("Total_ultimate")){
@@ -379,8 +378,17 @@ for (i in row.names(Total_seq_rxns)) {
     if (nrow(Subset_working_2) == 0) {
       Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined/mutated")
       names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-    #if there are good outcomes
-      } else{
+    #if there is only 1 type of outcome, make that the final outcome
+      }else if  (nrow(Subset_working_2) == 1){
+      Consensus = Subset_working_2 %>% select(-no_observations)  
+      #if there are 2 types of outcome
+      }else if (nrow(Subset_working_2) == 2){
+        
+      }
+        
+        
+        
+        
         #if there are multiple different outcomes
       if (nrow(Subset_working_2) > 1) {
         Top_hit = slice_head(Subset_working_2, n = 1)
@@ -462,7 +470,7 @@ writeData(work_book, sheet = 2, Total_trans_parents)
 addWorksheet(work_book, "Data_summary")
 writeData(work_book, sheet = 3, Total_ultimate_parents)
 
-saveWorkbook(work_book, file = paste0(input_dir, "SangerSeqAnalysis.xlsx"), overwrite=TRUE)
+saveWorkbook(work_book, file = paste0(output_dir, "SangerSeqAnalysis.xlsx"), overwrite=TRUE)
 
 
   
