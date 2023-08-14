@@ -326,16 +326,26 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
     #if the site is outside of the "good" window 
     if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]))
         {
+        if (current_site_table[[j, 2]] == "wt"){
+          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"= "wt (GT het)", "Caution" = TRUE)
+        }else if (current_site_table[[j, 2]] == "GT hom"){
+          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"= "GT hom (GT het)", "Caution" = TRUE)
+        }else{
           InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"=current_site_table[[j, 2]], "Caution" = TRUE)
+        }
+        #if it is inside the good window  
         } else{
           InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"=current_site_table[[j, 2]], "Caution" = FALSE)}
+    #fix the col names
     names(InterPretCaution)=c("SangerSeqNo", Site_name, paste0(Site_name, ".caution"))
-      if (exists("current_site_table_InterPretCaution")==TRUE){
+    #combine data of this sequence with data of previous sequences on this site 
+     if (exists("current_site_table_InterPretCaution")==TRUE){
   current_site_table_InterPretCaution = rbind(current_site_table_InterPretCaution, InterPretCaution)
   }else{
     current_site_table_InterPretCaution = InterPretCaution
   }
   }
+  #combine data from the current site with data of previous sites
 if (exists("total_site_table_InterPretCaution")==TRUE){
   total_site_table_InterPretCaution = left_join(total_site_table_InterPretCaution, current_site_table_InterPretCaution, by="SangerSeqNo")
 }else{
@@ -343,7 +353,7 @@ if (exists("total_site_table_InterPretCaution")==TRUE){
 }
   
   }
-
+  #add sample and parent info
   Total_trans_samples = merge(total_site_table_InterPretCaution, dna_samples, by="SangerSeqNo")  
   Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
   
@@ -365,6 +375,7 @@ for (i in row.names(Total_seq_rxns)) {
   for (j in row.names(sites)) {
     Site_name = as.character(sites %>% filter(row.names(sites) %in% j) %>% select(Name))
     
+    #summarize so that there is not a sequence per row, but a distinct outcome per row
     Subset_working = Total_trans_parents %>%
       select(DNASample, SangerSeqNo, {{Site_name}}) %>%
       filter(DNASample == Sample_name) %>%
@@ -372,92 +383,60 @@ for (i in row.names(Total_seq_rxns)) {
       summarize(no_observations = n()) %>%
       arrange(desc(no_observations))
     
+    #remove rows where site is undetermined or possibly mutated (usually the latter indicates bad sequence quality, not true mutation)
     Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "mutated")
     
     #if all are undetermined or mutated make this the final outcome
     if (nrow(Subset_working_2) == 0) {
-      Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined/mutated")
+      Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
       names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-    #if there is only 1 type of outcome, make that the final outcome
-      }else if  (nrow(Subset_working_2) == 1){
-      Consensus = Subset_working_2 %>% select(-no_observations)  
-      #if there are 2 types of outcome
-      }else if (nrow(Subset_working_2) == 2){
-        
-      }
-        
-        
-        
-        
-        #if there are multiple different outcomes
-      if (nrow(Subset_working_2) > 1) {
-        Top_hit = slice_head(Subset_working_2, n = 1)
-        Top_hit_number = Top_hit$no_observations
-        
-        Second_hit = slice_head(Subset_working_2, n = 2) %>% slice_tail(n = 1)
-        Second_hit_number = Second_hit$no_observations
-        
-        #there is still a problem below, it can be that one reaction (one orientation) does not give the correct answer. And if I did 2 reactions from 1 side, and 1 reaction from the other, there will be a bias. It then should not matter how often a certain outcome is found...
-        
-        #if the first and second most outcomes are tied, determine what kind of combinatory outcome to output
-        if (Top_hit_number == Second_hit_number) {
-          #a mix of wt or wt/GT het and GT het or wt/GT het
-          if ((Top_hit[[1,2]] == "wt/GT het" & Second_hit[[1,2]] == "GT het" ) |
-            (Top_hit[[1,2]] == "GT het" & Second_hit[[1,2]] == "wt/GT het")){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/GT het")
+    #if not undetermined or mutated, the specific combination of different outcomes determines the final outcome
+      }else if (nrow(Subset_working_2) > 0){
+        if ("wt" %in% Subset_working_2[,2]){
+          if ("GT hom" %in% Subset_working_2[,2] | "GT het" %in% Subset_working_2[,2] | "GT hom (GT het)" %in% Subset_working_2[,2]){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-            
-            #a mix of wt/GT het and GT het
-            }else if ((Top_hit[[1,2]] == "wt/GT het" & Second_hit[[1,2]] == "GT het") |
-            (Top_hit[[1,2]] == "GT het" & Second_hit[[1,2]] == "wt/GT het")){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
-            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-            
-            #a mix of wt and wt/GT het
-            }else if ((Top_hit[[1,2]] == "wt" & Second_hit[[1,2]] == "wt/GT het") |
-            (Top_hit[[1,2]] == "wt/GT het" & Second_hit[[1,2]] == "wt")){
+          }else{
             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-            
-            #a mix of wt and GT hom
-            }else if ((Top_hit[[1,2]] == "wt" & Second_hit[[1,2]] == "GT hom") |
-            (Top_hit[[1,2]] == "GT hom" & Second_hit[[1,2]] == "wt")){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/GT hom")
+          }
+        }else if ("GT hom" %in% Subset_working_2[,2]){
+          if ("GT het" %in% Subset_working_2[,2]){
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT")
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }else{
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT hom")  
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }
+        }else if ("GT het" %in% Subset_working_2[,2]){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        }else if ("wt (GT het)" %in% Subset_working_2[,2]){
+          if ("GT hom (GT het)" %in% Subset_working_2[,2]){
+                        Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
+                        names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }else{
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }
           
-            #a mix of wt/GT het and GT hom or GT hom/GT het
-            }else if ((Top_hit[[1,2]] == "wt/GT het" & (Second_hit[[1,2]] == "GT hom" | Second_hit[[1,2]] == "GT hom/GT het")) |
-            ((Top_hit[[1,2]] == "GT hom" | Top_hit[[1,2]] == "GT hom/GT het") & Second_hit[[1,2]] == "wt/ GT het")){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/GT het/GT hom")
-            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-          
-            #a mix of GT hom and GT het and GT hom/GT het
-            } else{
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT hom/GT het")
-            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-            }
-          #if there is one outcome with more observations then the runner up, make that the final outcome
-        } else{
-          Consensus = Top_hit %>% select(-no_observations)
+        }else{
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT")
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
-        #if there is just 1 outcome, make that the final outcome
-      } else{
-        Consensus = Subset_working_2 %>% select(-no_observations)
       }
-      
-    }
-    
+        
+    #combine data from different sites
     Total_consensus = left_join(Total_consensus, Consensus, by = "DNASample")
   }
+  #combine data from different samples
   if (exists("Total_ultimate") == TRUE) {
     Total_ultimate = rbind(Total_ultimate, Total_consensus)
   } else{
     Total_ultimate = Total_consensus
   }
-  
-  
 }
-
+#add parent info again
 Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = "DNASample")
 
   
