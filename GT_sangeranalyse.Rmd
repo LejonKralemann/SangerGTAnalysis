@@ -387,32 +387,33 @@ for (i in row.names(Total_seq_rxns)) {
     Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "mutated")
     
     #if all are undetermined or mutated make this the final outcome
+    outcomes=pull(Subset_working_2, Site_name)
     if (nrow(Subset_working_2) == 0) {
       Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
       names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
     #if not undetermined or mutated, the specific combination of different outcomes determines the final outcome
       }else if (nrow(Subset_working_2) > 0){
-        if ("wt" %in% Subset_working_2[,2]){
-          if ("GT hom" %in% Subset_working_2[,2] | "GT het" %in% Subset_working_2[,2] | "GT hom (GT het)" %in% Subset_working_2[,2]){
+        if ("wt" %in% outcomes){
+          if ("GT hom" %in% outcomes | "GT het" %in% outcomes | "GT hom (GT het)" %in% outcomes){
             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else if ("GT hom" %in% Subset_working_2[,2]){
-          if ("GT het" %in% Subset_working_2[,2]){
+        }else if ("GT hom" %in% outcomes){
+          if ("GT het" %in% outcomes){
           Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
           Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT hom")  
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else if ("GT het" %in% Subset_working_2[,2]){
+        }else if ("GT het" %in% outcomes){
             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }else if ("wt (GT het)" %in% Subset_working_2[,2]){
-          if ("GT hom (GT het)" %in% Subset_working_2[,2]){
+        }else if ("wt (GT het)" %in% outcomes){
+          if ("GT hom (GT het)" %in% outcomes){
                         Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
                         names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
