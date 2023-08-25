@@ -49,6 +49,13 @@ jsiglevel1=1
 jsiglevel2=0.05
 jsiglevel3=0.01
 jsiglevel4=0.001
+
+fill_colour_df=data.frame(value=factor(c("undetermined", "wt", "GT het", "GT", "GT hom")), 
+                        fill_colour=factor(c("grey", "cornflowerblue", "plum", "palevioletred", "coral1")),
+                        fill_colour_order=factor(c(5, 1, 2, 3, 4)))
+
+
+
 ```
 
 ```{r}
@@ -541,13 +548,16 @@ alldata_combined1=left_join(alldata_xpos, alldata_xpos_F2)
 alldata_combined2=left_join(alldata_combined1, alldata_xpos_F1)
 alldata_combined3=left_join(alldata_combined2, alldata_xpos_T2)
 
+tebwt=expression(italic(TEB)^"+/+")
+tebmut=expression(italic(TEB)^"-/-")
+
 #draw a stacked bar chart
 plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
   geom_tile(aes(x=x_pos_sample, y=y_pos), height=1, width=1, linewidth=0)+
   geom_segment(aes(x=0.5, xend=0.5, y=0.5, yend=5.5))+
   geom_segment(aes(x=xpos_F2_stop+0.5, xend=xpos_F2_stop+0.5, y=0.5, yend=5.5))+
   geom_segment(aes(x=xpos_F2_start-0.25, xend=xpos_F2_stop+0.25, y=0.25, yend=0.25))+
-  geom_text(aes(x=(xpos_F2_start+xpos_F2_stop)/2, y=0.05, label=F2), size=geom.text.size)+
+  geom_text(aes(x=(xpos_F2_start+xpos_F2_stop)/2, y=0.05, label=F2, colour=Genotype), size=geom.text.size)+
   geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=-0.25, yend=-0.25))+
    geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=-0.45, label=F1), size=geom.text.size)+
   geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.75, yend=-0.75))+
@@ -564,6 +574,7 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   annotate("text", label="T2", x=-1, y=-0.95, size=geom.text.size)+
   #fix below
   scale_fill_identity(guide="legend", breaks=alldata_xpos_fill_legend$fill_colour, labels=alldata_xpos_fill_legend$value)+
+  scale_color_manual(name="F2 bkgd:", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
   scale_y_continuous(breaks=c(1,2,3,4,5), labels=c(1,2,3,4,5))+
   labs(y="                        Site", fill="")+
     theme(panel.border = element_blank(), 
@@ -586,6 +597,133 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
 plt
 ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=15, height=4)
 ggsave(file=paste0(output_dir, "main_stackedbar.svg"), plot=plt, width=15, height=4)
+
+
+```
+#make a figure to display the summarized data of the controls
+```{r}
+#process data
+alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
+  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>%
+  filter(Genotype=="?" | is.na(T2))%>%
+  filter(Site!="Site_1")%>%
+  filter(DNASample != "38_1" & DNASample != "38_2")%>%
+  mutate(y_pos = case_when(Site == "Site_2" ~ 1,
+                           Site == "Site_3" ~ 2,
+                           Site == "Site_4" ~ 3,
+                           Site == "Site_5" ~ 4,
+                           Site == "Site_6" ~ 5)) %>%
+  mutate(T2 = as.integer(T2))%>%
+  mutate(F1 = as.integer(F1))%>%
+  mutate(F2 = as.integer(F2))%>%
+  arrange(T2, F1, F2) 
+  
+alldata_samples = alldata %>% select(DNASample) %>% unique()
+alldata_samples$x_pos_sample = as.integer(row.names(alldata_samples))
+
+alldata_xpos = left_join(alldata, alldata_samples) %>%
+  mutate(fill_colour= case_when(value=="undetermined" ~ "grey",
+                               value == "wt" ~ "cornflowerblue",
+                               value == "GT het"~ "plum",
+                               value == "GT" ~ "palevioletred",
+                               value == "GT hom" ~ "coral1",
+                               TRUE ~ "white"))%>%
+  mutate(fill_colour_order= case_when(value=="undetermined" ~ 5,
+                               value == "wt" ~ 1,
+                               value == "GT het"~ 2,
+                               value == "GT" ~ 3,
+                               value == "GT hom" ~ 4,
+                               TRUE ~ 6))
+
+alldata_xpos_fill_legend = alldata_xpos %>% 
+  select(fill_colour, value, fill_colour_order) %>%
+  unique()%>%
+  arrange(fill_colour_order)
+
+
+#make a dataframe with F2 group positions
+alldata_xpos_F2 = alldata_xpos %>% 
+  select(T2, F1, F2, x_pos_sample) %>%
+  unique()%>%
+  group_by(T2, F1, F2) %>% 
+  summarize(xpos_F2_stop = dplyr::last(x_pos_sample),
+            count_F2=n())%>%
+  mutate(xpos_F2_start = xpos_F2_stop - (count_F2-1))
+
+
+#make a dataframe with F1 group positions
+alldata_xpos_F1 = alldata_xpos %>% 
+  select(T2, F1, F2, x_pos_sample) %>%
+    unique()%>%
+  group_by(T2, F1) %>% 
+  summarize(xpos_F1_stop = dplyr::last(x_pos_sample),
+            count_F1=n())%>%
+  mutate(xpos_F1_start = xpos_F1_stop - (count_F1-1))
+
+
+#make a dataframe with T2 group positions
+alldata_xpos_T2 = alldata_xpos %>% 
+  select(T2, F1, F2, x_pos_sample) %>%
+    unique()%>%
+  group_by(T2) %>% 
+  summarize(xpos_T2_stop = dplyr::last(x_pos_sample),
+            count_T2=n())%>%
+  mutate(xpos_T2_start = xpos_T2_stop - (count_T2-1))
+
+alldata_combined1=left_join(alldata_xpos, alldata_xpos_F2)
+alldata_combined2=left_join(alldata_combined1, alldata_xpos_F1)
+alldata_combined3=left_join(alldata_combined2, alldata_xpos_T2)
+
+alldata_combined3$fill_colour = factor(alldata_combined3$fill_colour, levels=c("grey", "cornflowerblue", "plum", "palevioletred", "coral1"))
+
+tebwt=expression(italic(TEB)^"+/+")
+tebmut=expression(italic(TEB)^"-/-")
+
+#draw a stacked bar chart
+plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
+  geom_tile(aes(x=x_pos_sample, y=y_pos), height=1, width=1, linewidth=0)+
+  geom_segment(aes(x=0.5, xend=0.5, y=0.5, yend=5.5))+
+  geom_segment(aes(x=xpos_F2_stop+0.5, xend=xpos_F2_stop+0.5, y=0.5, yend=5.5))+
+  geom_segment(aes(x=xpos_F2_start-0.25, xend=xpos_F2_stop+0.25, y=0.25, yend=0.25))+
+  geom_text(aes(x=(xpos_F2_start+xpos_F2_stop)/2, y=0.05, label=F2), size=geom.text.size)+
+  geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=-0.25, yend=-0.25))+
+   geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=-0.45, label=F1), size=geom.text.size)+
+  geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.75, yend=-0.75))+
+   geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.95, label=T2), size=geom.text.size)+
+ geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
+ geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=2.5, yend=2.5))+
+ geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
+     geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=4.5, yend=4.5))+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=5.5, yend=5.5))+  
+  annotate("text", label="F2", x=-1, y=0.05, size=geom.text.size)+
+  annotate("text", label="F1", x=-1, y=-0.45, size=geom.text.size)+
+  annotate("text", label="T2", x=-1, y=-0.95, size=geom.text.size)+
+  #fix below
+  scale_fill_identity(guide="legend", breaks=fill_colour_df$fill_colour, labels=fill_colour_df$value, drop=FALSE)+
+  scale_y_continuous(breaks=c(1,2,3,4,5), labels=c(1,2,3,4,5))+
+  labs(y="                        Site", fill="")+
+    theme(panel.border = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        axis.title=element_text(size=theme.size, vjust=0.5), 
+        axis.ticks = element_blank(),
+        axis.text.x = element_blank(),
+        axis.title.x = element_blank(),
+        plot.title=element_text(size=theme.size), 
+        strip.text=element_text(size=theme.size),
+        strip.background = element_blank(),
+        text=element_text(family="Verdana"),
+        legend.position = "top",
+        legend.justification="right")+
+
+  coord_cartesian(ylim=c(-1.2, 5.5), expand=FALSE, clip="off")
+
+plt
+ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=15, height=4)
+ggsave(file=paste0(output_dir, "main_stackedbar_sup.svg"), plot=plt, width=15, height=4)
 
 
 ```
