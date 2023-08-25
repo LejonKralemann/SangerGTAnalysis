@@ -20,6 +20,7 @@ dna_samples = read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="sa
 reftable=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="reference")
 primerinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="primers")
 parentinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="dnasample_parents")
+dna_orient = left_join(dna_samples, primerinfo, by="PrimerName") %>% select(SangerSeqNo, Orientation)
 ```
 
 ```{r}
@@ -37,8 +38,8 @@ GT_peak_ratio_zones = 0.1
 #length of sequence to match to find the GT sites
 GT_fdr_len = 20
 
-#length of sequence to find good zones
-search_width = 30
+#length of sequence to find whether site adjacent areas are mutated
+search_width = 40
 
 #drawing options
 theme.size=7 # in points
@@ -69,16 +70,21 @@ refsequence=DNAString(reftable$Sequence[1])
 refsequence_RC = reverseComplement(refsequence)
 ref_len=nchar(as.character(refsequence))
 
-#make an empty dataframe
+#make empty dataframes
 Total_data = tibble(Name = NULL,
                        Seq1 = NULL,
                        Seq2 = NULL,
                        SangerSeq = NULL,
                        WTseq = NULL,
-                       GTseq = NULL)
-Total_zones = tibble(SangerSeqNo = NULL,
-                     good_zone_start = NULL,
-                     good_zone_end = NULL)
+                       GTseq = NULL,
+                       before_zone = NULL,
+                       after_zone = NULL)
+Total_data_before = tibble(Name = NULL,
+                       Genotype = NULL,
+                       SangerSeq = NULL)
+Total_data_after = tibble(Name = NULL,
+                       Genotype = NULL,
+                       SangerSeq = NULL)
 
 files=list.files(path=input_dir, pattern=".ab1$")
 
@@ -95,36 +101,37 @@ clean_ab1_name_2 = str_replace(clean_ab1_name, ".ab1", "")
 current_primer=as.character(dna_samples %>% filter(SangerSeqNo == clean_ab1_name_2) %>% select(PrimerName) )
 current_orientation=as.character(primerinfo %>% filter(PrimerName == current_primer) %>% select(Orientation))
   
-#make an empty dataframe
+#make empty dataframes
 Subtotal_data = tibble(Name = NULL,
                        Seq1 = NULL,
                        Seq2 = NULL,
                        SangerSeq = NULL,
                        WTseq = NULL,
-                       GTseq = NULL)
+                       GTseq = NULL,
+                       before_zone = NULL,
+                       after_zone = NULL)
+Subtotal_data_before = tibble(Name = NULL,
+                       Genotype = NULL)
+Subtotal_data_after = tibble(Name = NULL,
+                       Genotype = NULL)
 
 #get basecalls from the ab1 file, split in primary and secondary
 abifbasecalls = makeBaseCalls(abif1,ratio=GT_peak_ratio)
-abifbasecalls_zones = makeBaseCalls(abif1,ratio=GT_peak_ratio_zones)
   
 #determine what alle is same as the ref and extract the primary and secondary sequences
 if (current_orientation == "FW"){
 hetseqalleles = try(setAllelePhase(abifbasecalls,refsequence,trim5=50,trim3=300), silent=TRUE)
-hetseqalleles_zones = try(setAllelePhase(abifbasecalls_zones,refsequence,trim5=50,trim3=300), silent=TRUE)
 }else{
 hetseqalleles = try(setAllelePhase(abifbasecalls,refsequence_RC,trim5=50,trim3=300), silent=TRUE)
-hetseqalleles_zones = try(setAllelePhase(abifbasecalls_zones,refsequence_RC,trim5=50,trim3=300), silent=TRUE)
 }
 
 #if sequence is really bad, program should skip it and move on
-if (inherits(hetseqalleles,'try-error') == TRUE | inherits(hetseqalleles_zones,'try-error') == TRUE){
+if (inherits(hetseqalleles,'try-error') == TRUE ){
   next
 }
 
 PrimSeq = DNAString(hetseqalleles@primarySeq)
 SecSeq = DNAString(hetseqalleles@secondarySeq)
-#below gives an error because the check for error above is not for the zones object
-SecSeq_zones = DNAString(hetseqalleles_zones@secondarySeq)
 
 for (i in row.names(sites)){
   #get info from table
@@ -134,7 +141,7 @@ for (i in row.names(sites)){
   Site_width = nchar(GT_Seq)
   Insertion = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Insertion))
   
-  #Get the wt seq from the ref
+  #Get the wt seq from the ref (only for the site/region of interest)
   if (current_orientation == "FW"){
   WT_Seq = as.character(subseq(refsequence, start=Site_start, width=Site_width))
   }else{
@@ -144,26 +151,34 @@ for (i in row.names(sites)){
       WT_Seq = as.character(subseq(refsequence, start=Site_start, width=Site_width))
     }
   }
-  
-  #get the sequence preceding the site of interest to match
+
+  #get the sequence preceding and following the site of interest to match
   if (current_orientation == "FW"){
   SeqToSearch=subseq(refsequence, start=Site_start-GT_fdr_len, width=GT_fdr_len)
+  SeqToSearch_before=subseq(refsequence, start=Site_start-search_width, width=search_width)
+  SeqToSearch_after=subseq(refsequence, start=Site_start+Site_width, width=search_width)
   }else{
   #search on the other side of the site of interest when using reverse sequencing primer
   if (Insertion > 0){
   SeqToSearch=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-(1+Insertion))+GT_fdr_len)), width=GT_fdr_len)
+  SeqToSearch_before=subseq(refsequence_RC, start=(ref_len-(Site_start-2)), width=search_width)
+  SeqToSearch_after=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-(1+Insertion))+search_width)), width=search_width)
+  
   }else{
   SeqToSearch=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-1)+GT_fdr_len)), width=GT_fdr_len)
-  }
-  }
+  SeqToSearch_before=subseq(refsequence_RC, start=(ref_len-(Site_start-2)), width=search_width)
+  SeqToSearch_after=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-1)+search_width)), width=search_width)
   
-
+  }
+  }
   
   #find the SeqToSearch in the primary and secondary calls
   MatchPrim= matchPattern(SeqToSearch, PrimSeq, max.mismatch = 0)
   MatchSec= matchPattern(SeqToSearch, SecSeq, max.mismatch = 0)
   PositionAfterStartPrim = MatchPrim@ranges@start+(MatchPrim@ranges@width)
   PositionAfterStartSec = MatchSec@ranges@start+(MatchSec@ranges@width)
+  
+  
   
   #get the sequences of the site of interest
   #strict mode that looks for the sites in the primary and secondary sequences
@@ -209,14 +224,29 @@ for (i in row.names(sites)){
   }
   }
 
+  #find the SeqToSearch again, this time allowing mismatches
+  MatchSec_before= matchPattern(SeqToSearch_before, SecSeq, max.mismatch = 10)
+  MatchSec_after= matchPattern(SeqToSearch_after, SecSeq, max.mismatch = 10)
+  if (length(MatchSec_before)>0){
+  before_zone = "wt"  
+  }else{
+  before_zone = "mutated"   
+  }
+   if (length(MatchSec_after)>0){
+  after_zone = "wt"   
+  }else{
+  after_zone = "mutated"    
+  }
+  
   #write it to an object
   currentData = tibble(Name=Site_name, Seq1=Allele1Seq, Seq2=Allele2Seq) %>% 
     mutate(WTseq = WT_Seq, 
-           GTseq = GT_Seq)
-  
-
+           GTseq = GT_Seq,
+           before_zone = before_zone,
+           after_zone = after_zone)
   
   Subtotal_data = rbind(Subtotal_data, currentData)
+
   
 }
 Subtotal_data_names = Subtotal_data %>% 
@@ -224,83 +254,9 @@ Subtotal_data_names = Subtotal_data %>%
 
 Total_data = rbind(Total_data, Subtotal_data_names)
 
-##########################################################################
-#find good/bad zones
-############################################################################
-
-  
-#for determining which area is the first matching area (in case of a large deletion)
-
-secseqlen=nchar(as.character(SecSeq_zones))
-number_of_bins=floor(secseqlen/search_width)
-if (exists("search_list")){
-rm(search_list)}
-for (i in 1:number_of_bins){
-  search_seq = as.character(subseq(SecSeq_zones, ((search_width*(i-1))+1), ((search_width*(i-1))+search_width)))
-  if (exists("search_list")==TRUE){
-      search_list = c(search_list, search_seq)
-  }else{
-    search_list = search_seq
-  }
-}
-search_list_df = data.frame(search_list)
-
-#match windows across the entire sequence to determine where the sequence is simple and where multiple sequences are going through each other. Match the secondary sequence, because if this one is like the ref, it means there is no mix of sequences. 
-if (exists("set_start_good")){
-  rm(set_start_good)}
-if (exists("set_end_good")){
-  rm(set_end_good)}
-if (exists("last_good_end")){
-  rm(last_good_end)}  
-  
-    for (k in row.names(search_list_df)){
-if (current_orientation == "FW"){
-      MatchPrim = matchPattern(search_list_df[[k,1]], refsequence, max.mismatch = 3)
-}else{
-  MatchPrim = matchPattern(search_list_df[[k,1]], refsequence_RC, max.mismatch = 3)
-}
-      Match_start = MatchPrim@ranges@start
-      Match_end = Match_start+MatchPrim@ranges@width-1
-
-      if (length(Match_start) > 0 & exists("set_start_good")==FALSE){
-        set_start_good = Match_start
-        last_good_end = Match_end
-      }else if (length(Match_start) > 0 & exists("set_start_good")==TRUE){
-        last_good_end = Match_end
-      }else if (length(Match_start) == 0 & exists("set_start_good") == TRUE){
-        set_end_good = last_good_end
-        break
-      }
-    }
-
-#combine the zone data with the rest
-
-if (exists("set_start_good")==TRUE){
-  if (current_orientation == "FW"){
-  Sanger_zones = tibble(SangerSeqNo = clean_ab1_name_2,
-                               good_zone_start = set_start_good,
-                               good_zone_end = set_end_good)
-
-  }else{
-    Sanger_zones = tibble(SangerSeqNo = clean_ab1_name_2,
-                                 good_zone_start = ref_len - (set_end_good-1),
-                                 good_zone_end = ref_len - (set_start_good-1))
-
-  }
-  
-}else{
-  
-  Sanger_zones = tibble(SangerSeqNo = clean_ab1_name_2,
-                                 good_zone_start = 99999999,
-                                 good_zone_end = 99999999)
-}
-  
-Total_zones = rbind(Total_zones, Sanger_zones)
-  
-  
 }
 #############################################################################################
-#interpreting the outcomes
+#interpreting the outcomes & changing format
 ###############################################################################################
 
 #basic interpretation
@@ -312,81 +268,29 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   TRUE ~ "mutated")) %>%
   mutate(Strict = strict)
   
-  Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype)
   #Change the format of the data
+  Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype)
   Total_trans = spread(Data_clean, Name, Genotype)
-  #add zone info
-  Total_trans_zones = left_join(Total_trans, Total_zones, by="SangerSeqNo")
   
-  #add a column that indicates when an interpretation is not certain (i.e. that only 1 of the two alleles has been called)
-  if (exists("total_site_table_InterPretCaution")){ 
-  rm(total_site_table_InterPretCaution)}
-  
-  for (i in row.names(sites)){
-    Site_name = as.character(sites %>% filter(row.names(sites) %in% i) %>% select(Name))
-    Site_start = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Location))
-    GT_Seq =  as.character(sites %>% filter(row.names(sites) %in% i) %>% select(GT))
-    Site_width = nchar(GT_Seq)
-    total_sites = nrow(sites)
-    Total_trans_zones[,as.integer(i)+1]
-  
-  current_site_table = data.frame(SangerSeqNo = Total_trans_zones[,1], 
-                                  Site_name = Total_trans_zones[,as.integer(i)+1], 
-                                  good_zone_start = Total_trans_zones[, total_sites+2], 
-                                  good_zone_end = Total_trans_zones[, total_sites+3])
- if (exists("current_site_table_InterPretCaution")){
-  rm(current_site_table_InterPretCaution)}
-  
-  for (j in row.names(current_site_table)) {
-    
-    SangerSeqNo_current = as.character(current_site_table %>% filter(row.names(current_site_table) %in% j) %>% select(SangerSeqNo))
-    
-    #if the site is outside of the "good" window 
-    if ((Site_start < current_site_table[[j, 3]] | (Site_start + (Site_width - 1)) > current_site_table[[j, 4]]))
-        {
-        if (current_site_table[[j, 2]] == "wt"){
-          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"= "wt (GT het)", "Caution" = TRUE)
-        }else if (current_site_table[[j, 2]] == "GT hom"){
-          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"= "GT hom (GT het)", "Caution" = TRUE)
-        }else{
-          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"=current_site_table[[j, 2]], "Caution" = TRUE)
-        }
-        #if it is inside the good window  
-        } else{
-          InterPretCaution = data.frame("SangerSeqNo" = SangerSeqNo_current, "temp_site_name"=current_site_table[[j, 2]], "Caution" = FALSE)}
-    #fix the col names
-    names(InterPretCaution)=c("SangerSeqNo", Site_name, paste0(Site_name, ".caution"))
-    #combine data of this sequence with data of previous sequences on this site 
-     if (exists("current_site_table_InterPretCaution")==TRUE){
-  current_site_table_InterPretCaution = rbind(current_site_table_InterPretCaution, InterPretCaution)
-  }else{
-    current_site_table_InterPretCaution = InterPretCaution
-  }
-  }
-  #combine data from the current site with data of previous sites
-if (exists("total_site_table_InterPretCaution")==TRUE){
-  total_site_table_InterPretCaution = left_join(total_site_table_InterPretCaution, current_site_table_InterPretCaution, by="SangerSeqNo")
-}else{
-  total_site_table_InterPretCaution = current_site_table_InterPretCaution
-}
-  
-  }
   #add sample and parent info
-  Total_trans_samples = merge(total_site_table_InterPretCaution, dna_samples, by="SangerSeqNo")  
+  Total_trans_samples = merge(Total_trans, dna_samples, by="SangerSeqNo")  
   Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
+  Total_trans_primer = left_join(Total_trans_parents, dna_orient, by="SangerSeqNo")  
+
   
 #####################################################################################################  
 #then show the data per sample  
-#determine what the outcome should be when not all sequences agree. Give priority to those that are site_name.caution==FALSE
+#determine what the outcome should be when not all sequences agree. 
 #########################################################################################################
 
 if (exists("Total_ultimate")){
 rm(Total_ultimate)}
-Total_seq_rxns = Total_trans_parents %>% group_by(DNASample) %>% summarize(count_reactions = n())
-Site_names = pull(sites, Name)
 
+  Total_seq_rxns = Total_trans_parents %>% group_by(DNASample) %>% summarize(count_reactions = n())
+#Site_names = pull(sites, Name)
 
 for (i in row.names(Total_seq_rxns)) {
+  #initialize dataframes
   Total_consensus = Total_seq_rxns %>% filter(row.names(Total_seq_rxns) %in% i) %>% select(DNASample)
   Sample_name = as.character(Total_consensus)
   
@@ -447,6 +351,7 @@ for (i in row.names(Total_seq_rxns)) {
         
     #combine data from different sites
     Total_consensus = left_join(Total_consensus, Consensus, by = "DNASample")
+    
   }
   #combine data from different samples
   if (exists("Total_ultimate") == TRUE) {
@@ -455,6 +360,8 @@ for (i in row.names(Total_seq_rxns)) {
     Total_ultimate = Total_consensus
   }
 }
+
+
 #add parent info again
 Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = "DNASample")
 
@@ -464,7 +371,7 @@ work_book <- createWorkbook()
 addWorksheet(work_book, "Data_detailed")
 writeData(work_book, sheet = 1, Total_data_interp)
 addWorksheet(work_book, "Data_compact")
-writeData(work_book, sheet = 2, Total_trans_parents)
+writeData(work_book, sheet = 2, Total_trans_primer)
 addWorksheet(work_book, "Data_summary")
 writeData(work_book, sheet = 3, Total_ultimate_parents)
 
@@ -474,19 +381,19 @@ saveWorkbook(work_book, file = paste0(output_dir, "SangerSeqAnalysis.xlsx"), ove
   
   
 ```  
+
 #make a figure to display the summarized data
 ```{r}
 #process data
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
-  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>%
+  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5), names_to = "Site")%>%
   filter(Genotype!="?")%>%
   filter(!is.na(T2))%>%
-  filter(Site!="Site_1")%>%
-  mutate(y_pos = case_when(Site == "Site_2" ~ 1,
-                           Site == "Site_3" ~ 2,
-                           Site == "Site_4" ~ 3,
-                           Site == "Site_5" ~ 4,
-                           Site == "Site_6" ~ 5)) %>%
+  mutate(y_pos = case_when(Site == "Site_1" ~ 1,
+                           Site == "Site_2" ~ 2,
+                           Site == "Site_3" ~ 3,
+                           Site == "Site_4" ~ 4,
+                           Site == "Site_5" ~ 5)) %>%
   mutate(T2 = as.integer(T2))%>%
   mutate(F1 = as.integer(F1))%>%
   mutate(F2 = as.integer(F2))%>%
@@ -604,15 +511,14 @@ ggsave(file=paste0(output_dir, "main_stackedbar.svg"), plot=plt, width=15, heigh
 ```{r}
 #process data
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
-  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>%
+  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5), names_to = "Site")%>%
   filter(Genotype=="?" | is.na(T2))%>%
-  filter(Site!="Site_1")%>%
   filter(DNASample != "38_1" & DNASample != "38_2")%>%
-  mutate(y_pos = case_when(Site == "Site_2" ~ 1,
-                           Site == "Site_3" ~ 2,
-                           Site == "Site_4" ~ 3,
-                           Site == "Site_5" ~ 4,
-                           Site == "Site_6" ~ 5)) %>%
+  mutate(y_pos = case_when(Site == "Site_1" ~ 1,
+                           Site == "Site_2" ~ 2,
+                           Site == "Site_3" ~ 3,
+                           Site == "Site_4" ~ 4,
+                           Site == "Site_5" ~ 5)) %>%
   mutate(T2 = as.integer(T2))%>%
   mutate(F1 = as.integer(F1))%>%
   mutate(F2 = as.integer(F2))%>%
