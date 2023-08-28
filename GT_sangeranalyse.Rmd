@@ -51,9 +51,9 @@ jsiglevel2=0.05
 jsiglevel3=0.01
 jsiglevel4=0.001
 
-fill_colour_df=data.frame(value=factor(c("undetermined", "wt", "GT het", "GT", "GT hom")), 
-                        fill_colour=factor(c("grey", "cornflowerblue", "plum", "palevioletred", "coral1")),
-                        fill_colour_order=factor(c(5, 1, 2, 3, 4)))
+fill_colour_df=data.frame(value=factor(c("wt/wt", "wt/mut", "GT/wt", "GT/mut", "GT/GT", "mut/mut", "undetermined")), 
+                        fill_colour=factor(c("cornflowerblue", "darkslategray3", "plum", "lightsalmon2", "indianred3", "lightgoldenrod2", "grey")),
+                        fill_colour_order=factor(c(1, 2, 3, 4, 5, 6, 7)))
 
 
 
@@ -261,11 +261,13 @@ Total_data = rbind(Total_data, Subtotal_data_names)
 
 #basic interpretation
 Total_data_interp = Total_data %>% mutate(Genotype = case_when(
-  Seq1 == WTseq & Seq2 == WTseq ~ "wt",
-  Seq1 == WTseq & Seq2 == GTseq ~ "GT het",
-  Seq1 == GTseq & Seq2 == GTseq ~ "GT hom",
+  Seq1 == WTseq & Seq2 == WTseq ~ "wt/wt",
+  Seq1 == WTseq & Seq2 == GTseq ~ "GT/wt",
+  Seq1 != WTseq & Seq1 != GTseq & Seq1 != "not found" & Seq2 == GTseq ~ "GT/mut", 
+  Seq1 == GTseq & Seq2 == GTseq ~ "GT/GT",
   Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
-  TRUE ~ "mutated")) %>%
+  Seq1 == WTseq & Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" ~ "wt/mut",
+  TRUE ~ "mut/mut")) %>%
   mutate(Strict = strict)
   
   #Change the format of the data
@@ -305,47 +307,63 @@ for (i in row.names(Total_seq_rxns)) {
       summarize(no_observations = n()) %>%
       arrange(desc(no_observations))
     
-    #remove rows where site is undetermined or possibly mutated (usually the latter indicates bad sequence quality, not true mutation)
-    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "mutated")
+    #remove rows where site is undetermined or possibly mutated (the latter could reflect poor sequence quality too) 
+    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "wt/mut" & get({{Site_name}}) != "mut/mut")
     
     #if all are undetermined or mutated make this the final outcome
     outcomes=pull(Subset_working_2, Site_name)
+    outcomes_unmut=pull(Subset_working, Site_name)
     if (nrow(Subset_working_2) == 0) {
-      Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
-      names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+      if ("mut/mut" %in% outcomes_unmut){
+        if ("wt/mut" %in% outcomes_unmut){
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/mut") #assume mut/mut was seq error or 1 allele had been missed
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        }else{
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "mut/mut")
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        }
+      }else{
+        if ("wt/mut" %in% outcomes_unmut){
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/mut")
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        }else{
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        }
+      }
     #if not undetermined or mutated, the specific combination of different outcomes determines the final outcome
       }else if (nrow(Subset_working_2) > 0){
-        if ("wt" %in% outcomes){
-          if ("GT hom" %in% outcomes | "GT het" %in% outcomes | "GT hom (GT het)" %in% outcomes){
+        if ("wt/wt" %in% outcomes){
+          if ("GT/GT" %in% outcomes){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }else if ("GT/wt" %in% outcomes){
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/wt")  #assume 1 allele was missed in wt/wt case
+            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }else if  ("GT/mut" %in% outcomes){
             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt")
+             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else if ("GT hom" %in% outcomes){
-          if ("GT het" %in% outcomes){
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
+        }else if ("GT/GT" %in% outcomes){ #if GT/GT but not wt/wt
+          if ("GT/wt" %in% outcomes){
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/wt") #assume one allele was missed in the GT/GT case
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+          }else if ("GT/mut" %in% outcomes){
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/mut")  #assume one allele was missed in the GT/GT case
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT hom")  
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/GT")  
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else if ("GT het" %in% outcomes){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
+        }else if ("GT/wt" %in% outcomes){#if GT/wt (or GT/mut) but not wt/wt and not GT/GT
+            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/wt") #assume mut was seq error
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }else if ("wt (GT het)" %in% outcomes){
-          if ("GT hom (GT het)" %in% outcomes){
-                        Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT het")
-                        names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-          }else{
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+        }else{
+          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/mut")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-          }
-          
-        }else{#if GT hom (GT het) and no others
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT")
-          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
       }
         
@@ -403,19 +421,22 @@ alldata_samples = alldata %>% select(DNASample) %>% unique()
 alldata_samples$x_pos_sample = as.integer(row.names(alldata_samples))
 
 alldata_xpos = left_join(alldata, alldata_samples) %>%
-  mutate(fill_colour= case_when(value=="undetermined" ~ "grey",
-                               value == "wt" ~ "cornflowerblue",
-                               value == "GT het"~ "plum",
-                               value == "GT" ~ "palevioletred",
-                               value == "GT hom" ~ "coral1",
-                               TRUE ~ "white"))%>%
-  mutate(fill_colour_order= case_when(value=="undetermined" ~ 5,
-                               value == "wt" ~ 1,
-                               value == "GT het"~ 2,
-                               value == "GT" ~ 3,
-                               value == "GT hom" ~ 4,
-                               TRUE ~ 6))
-
+  left_join(fill_colour_df, by="value") 
+#remove stuff below
+#%>%
+ # mutate(fill_colour= case_when(value=="undetermined" ~ "grey",
+ #                              value == "wt" ~ "cornflowerblue",
+ #                              value == "GT het"~ "plum",
+ #                              value == "GT" ~ "palevioletred",
+ #                              value == "GT hom" ~ "coral1",
+ #                              TRUE ~ "white"))%>%
+ # mutate(fill_colour_order= case_when(value=="undetermined" ~ 5,
+ #                              value == "wt" ~ 1,
+ #                              value == "GT het"~ 2,
+ #                              value == "GT" ~ 3,
+ #                              value == "GT hom" ~ 4,
+  #                             TRUE ~ 6))
+#
 alldata_xpos_fill_legend = alldata_xpos %>% 
   select(fill_colour, value, fill_colour_order) %>%
   unique()%>%
@@ -507,7 +528,7 @@ ggsave(file=paste0(output_dir, "main_stackedbar.svg"), plot=plt, width=15, heigh
 
 
 ```
-#make a figure to display the summarized data of the controls
+#make a figure to display the summarized data of the controls (old version!!)
 ```{r}
 #process data
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
