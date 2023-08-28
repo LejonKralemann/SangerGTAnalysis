@@ -259,8 +259,12 @@ Total_data = rbind(Total_data, Subtotal_data_names)
 #interpreting the outcomes & changing format
 ###############################################################################################
 
+#list of non-allowed characters
+forbiddenletters="([RYMKSWHBVDN])"
+
 #basic interpretation
 Total_data_interp = Total_data %>% mutate(Genotype = case_when(
+  str_detect(Seq1, forbiddenletters)==TRUE | str_detect(Seq2, forbiddenletters)==TRUE ~ "undetermined",
   Seq1 == WTseq & Seq2 == WTseq ~ "wt/wt",
   Seq1 == WTseq & Seq2 == GTseq ~ "GT/wt",
   Seq1 != WTseq & Seq1 != GTseq & Seq1 != "not found" & Seq2 == GTseq ~ "GT/mut", 
@@ -422,21 +426,7 @@ alldata_samples$x_pos_sample = as.integer(row.names(alldata_samples))
 
 alldata_xpos = left_join(alldata, alldata_samples) %>%
   left_join(fill_colour_df, by="value") 
-#remove stuff below
-#%>%
- # mutate(fill_colour= case_when(value=="undetermined" ~ "grey",
- #                              value == "wt" ~ "cornflowerblue",
- #                              value == "GT het"~ "plum",
- #                              value == "GT" ~ "palevioletred",
- #                              value == "GT hom" ~ "coral1",
- #                              TRUE ~ "white"))%>%
- # mutate(fill_colour_order= case_when(value=="undetermined" ~ 5,
- #                              value == "wt" ~ 1,
- #                              value == "GT het"~ 2,
- #                              value == "GT" ~ 3,
- #                              value == "GT hom" ~ 4,
-  #                             TRUE ~ 6))
-#
+
 alldata_xpos_fill_legend = alldata_xpos %>% 
   select(fill_colour, value, fill_colour_order) %>%
   unique()%>%
@@ -523,12 +513,12 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   coord_cartesian(ylim=c(-1.2, 5.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=15, height=4)
-ggsave(file=paste0(output_dir, "main_stackedbar.svg"), plot=plt, width=15, height=4)
+ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=9, height=4)
+
 
 
 ```
-#make a figure to display the summarized data of the controls (old version!!)
+#make a figure to display the summarized data, control data only
 ```{r}
 #process data
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
@@ -549,18 +539,7 @@ alldata_samples = alldata %>% select(DNASample) %>% unique()
 alldata_samples$x_pos_sample = as.integer(row.names(alldata_samples))
 
 alldata_xpos = left_join(alldata, alldata_samples) %>%
-  mutate(fill_colour= case_when(value=="undetermined" ~ "grey",
-                               value == "wt" ~ "cornflowerblue",
-                               value == "GT het"~ "plum",
-                               value == "GT" ~ "palevioletred",
-                               value == "GT hom" ~ "coral1",
-                               TRUE ~ "white"))%>%
-  mutate(fill_colour_order= case_when(value=="undetermined" ~ 5,
-                               value == "wt" ~ 1,
-                               value == "GT het"~ 2,
-                               value == "GT" ~ 3,
-                               value == "GT hom" ~ 4,
-                               TRUE ~ 6))
+  left_join(fill_colour_df, by="value") 
 
 alldata_xpos_fill_legend = alldata_xpos %>% 
   select(fill_colour, value, fill_colour_order) %>%
@@ -601,8 +580,6 @@ alldata_combined1=left_join(alldata_xpos, alldata_xpos_F2)
 alldata_combined2=left_join(alldata_combined1, alldata_xpos_F1)
 alldata_combined3=left_join(alldata_combined2, alldata_xpos_T2)
 
-alldata_combined3$fill_colour = factor(alldata_combined3$fill_colour, levels=c("grey", "cornflowerblue", "plum", "palevioletred", "coral1"))
-
 tebwt=expression(italic(TEB)^"+/+")
 tebmut=expression(italic(TEB)^"-/-")
 
@@ -628,7 +605,7 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   annotate("text", label="F1", x=-1, y=-0.45, size=geom.text.size)+
   annotate("text", label="T2", x=-1, y=-0.95, size=geom.text.size)+
   #fix below
-  scale_fill_identity(guide="legend", breaks=fill_colour_df$fill_colour, labels=fill_colour_df$value, drop=FALSE)+
+  scale_fill_identity(guide="legend", breaks=alldata_xpos_fill_legend$fill_colour, labels=alldata_xpos_fill_legend$value)+
   scale_y_continuous(breaks=c(1,2,3,4,5), labels=c(1,2,3,4,5))+
   labs(y="                        Site", fill="")+
     theme(panel.border = element_blank(), 
@@ -649,11 +626,10 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   coord_cartesian(ylim=c(-1.2, 5.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=15, height=4)
-ggsave(file=paste0(output_dir, "main_stackedbar_sup.svg"), plot=plt, width=15, height=4)
+ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=8, height=4)
+
 
 
 ```
-
 
 
