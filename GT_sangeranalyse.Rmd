@@ -282,31 +282,40 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   Total_trans_samples = merge(Total_trans, dna_samples, by="SangerSeqNo")  
   Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
   Total_trans_primer = left_join(Total_trans_parents, dna_orient, by="SangerSeqNo")  
-
   
-#####################################################################################################  
-#then show the data per sample  
+#########################################################################################################  
+#Find mutations independent of the GT sites
+#########################################################################################################
+  
+  
+  
+  
+######################################################################################################### 
+#then show the data per sample per locus
 #determine what the outcome should be when not all sequences agree. 
 #########################################################################################################
 
 if (exists("Total_ultimate")){
 rm(Total_ultimate)}
 
-  Total_seq_rxns = Total_trans_parents %>% group_by(DNASample) %>% summarize(count_reactions = n())
-#Site_names = pull(sites, Name)
+  Total_seq_rxns = Total_trans_parents %>% group_by(DNASample, Locus) %>% summarize(count_reactions = n()) %>%ungroup()
 
 for (i in row.names(Total_seq_rxns)) {
   #initialize dataframes
-  Total_consensus = Total_seq_rxns %>% filter(row.names(Total_seq_rxns) %in% i) %>% select(DNASample)
-  Sample_name = as.character(Total_consensus)
+  Total_consensus = Total_seq_rxns %>% dplyr::filter(row.names(Total_seq_rxns) %in% i) %>% select(DNASample, Locus)
+  Total_consensus_sample = Total_consensus %>% select(DNASample)
+  Total_consensus_locus = Total_consensus %>% select(Locus)
+  Sample_name = as.character(Total_consensus_sample)
+  Locus_name = as.character(Total_consensus_locus)
   
   for (j in row.names(sites)) {
     Site_name = as.character(sites %>% filter(row.names(sites) %in% j) %>% select(Name))
     
     #summarize so that there is not a sequence per row, but a distinct outcome per row
     Subset_working = Total_trans_parents %>%
-      select(DNASample, SangerSeqNo, {{Site_name}}) %>%
+      select(DNASample, Locus, SangerSeqNo, {{Site_name}}) %>%
       filter(DNASample == Sample_name) %>%
+      filter(Locus == Locus_name) %>%
       group_by(across(c(-SangerSeqNo))) %>%
       summarize(no_observations = n()) %>%
       arrange(desc(no_observations))
@@ -320,18 +329,18 @@ for (i in row.names(Total_seq_rxns)) {
     if (nrow(Subset_working_2) == 0) {
       if ("mut/mut" %in% outcomes_unmut){
         if ("wt/mut" %in% outcomes_unmut){
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/mut") #assume mut/mut was seq error or 1 allele had been missed
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/mut") #assume mut/mut was seq error or 1 allele had been missed
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }else{
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "mut/mut")
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "mut/mut")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
       }else{
         if ("wt/mut" %in% outcomes_unmut){
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/mut")
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/mut")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }else{
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
       }
@@ -339,40 +348,40 @@ for (i in row.names(Total_seq_rxns)) {
       }else if (nrow(Subset_working_2) > 0){
         if ("wt/wt" %in% outcomes){
           if ("GT/GT" %in% outcomes){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else if ("GT/wt" %in% outcomes){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/wt")  #assume 1 allele was missed in wt/wt case
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt")  #assume 1 allele was missed in wt/wt case
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else if  ("GT/mut" %in% outcomes){
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "undetermined")
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
-             Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "wt/wt")
+             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
         }else if ("GT/GT" %in% outcomes){ #if GT/GT but not wt/wt
           if ("GT/wt" %in% outcomes){
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/wt") #assume one allele was missed in the GT/GT case
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt") #assume one allele was missed in the GT/GT case
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else if ("GT/mut" %in% outcomes){
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/mut")  #assume one allele was missed in the GT/GT case
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/mut")  #assume one allele was missed in the GT/GT case
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/GT")  
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/GT")  
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
         }else if ("GT/wt" %in% outcomes){#if GT/wt (or GT/mut) but not wt/wt and not GT/GT
-            Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/wt") #assume mut was seq error
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt") #assume mut was seq error
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }else{
-          Consensus = data.frame(DNASample = {{Sample_name}}, temp_j = "GT/mut")
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/mut")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
       }
         
     #combine data from different sites
-    Total_consensus = left_join(Total_consensus, Consensus, by = "DNASample")
+    Total_consensus = left_join(Total_consensus, Consensus, by = c("DNASample", "Locus"))
     
   }
   #combine data from different samples
@@ -385,7 +394,7 @@ for (i in row.names(Total_seq_rxns)) {
 
 
 #add parent info again
-Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = "DNASample")
+Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = c("DNASample"))
 
   
   #write everything into an excel document
@@ -477,14 +486,14 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   geom_segment(aes(x=xpos_F2_start-0.25, xend=xpos_F2_stop+0.25, y=0.25, yend=0.25))+
   geom_text(aes(x=(xpos_F2_start+xpos_F2_stop)/2, y=0.05, label=F2, colour=Genotype), size=geom.text.size)+
   geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=-0.25, yend=-0.25))+
-   geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=-0.45, label=F1), size=geom.text.size)+
+  geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=-0.45, label=F1), size=geom.text.size)+
   geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.75, yend=-0.75))+
-   geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.95, label=T2), size=geom.text.size)+
- geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
- geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
+  geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.95, label=T2), size=geom.text.size)+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
   geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=2.5, yend=2.5))+
- geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
-     geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+
+  geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+
   geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=4.5, yend=4.5))+
   geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=5.5, yend=5.5))+  
   annotate("text", label="F2", x=-1, y=0.05, size=geom.text.size)+
@@ -587,24 +596,20 @@ tebmut=expression(italic(TEB)^"-/-")
 plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
   geom_tile(aes(x=x_pos_sample, y=y_pos), height=1, width=1, linewidth=0)+
   geom_segment(aes(x=0.5, xend=0.5, y=0.5, yend=5.5))+
-  geom_segment(aes(x=xpos_F2_stop+0.5, xend=xpos_F2_stop+0.5, y=0.5, yend=5.5))+
-  geom_segment(aes(x=xpos_F2_start-0.25, xend=xpos_F2_stop+0.25, y=0.25, yend=0.25))+
-  geom_text(aes(x=(xpos_F2_start+xpos_F2_stop)/2, y=0.05, label=F2), size=geom.text.size)+
-  geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=-0.25, yend=-0.25))+
-   geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=-0.45, label=F1), size=geom.text.size)+
-  geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.75, yend=-0.75))+
-   geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.95, label=T2), size=geom.text.size)+
- geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
- geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
+  geom_segment(aes(x=xpos_F1_stop+0.5, xend=xpos_F1_stop+0.5, y=0.5, yend=5.5))+
+  geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=0.25, yend=0.25))+
+  geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=0.05, label=F1), size=geom.text.size)+
+  geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.25, yend=-0.25))+
+  geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.45, label=T2), size=geom.text.size)+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
   geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=2.5, yend=2.5))+
- geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
-     geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+
+  geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
+  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+ 
   geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=4.5, yend=4.5))+
   geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=5.5, yend=5.5))+  
-  annotate("text", label="F2", x=-1, y=0.05, size=geom.text.size)+
-  annotate("text", label="F1", x=-1, y=-0.45, size=geom.text.size)+
-  annotate("text", label="T2", x=-1, y=-0.95, size=geom.text.size)+
-  #fix below
+  annotate("text", label="F1", x=-1, y=0.05, size=geom.text.size)+
+  annotate("text", label="T2", x=-1, y=-0.45, size=geom.text.size)+
   scale_fill_identity(guide="legend", breaks=alldata_xpos_fill_legend$fill_colour, labels=alldata_xpos_fill_legend$value)+
   scale_y_continuous(breaks=c(1,2,3,4,5), labels=c(1,2,3,4,5))+
   labs(y="                        Site", fill="")+
@@ -631,5 +636,7 @@ ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=8, he
 
 
 ```
+
+
 
 
