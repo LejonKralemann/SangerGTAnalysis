@@ -20,6 +20,7 @@ dna_samples = read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="sa
 reftable=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="reference")
 primerinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="primers")
 parentinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="dnasample_parents")
+DSBinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="DSB")
 dna_orient = left_join(dna_samples, primerinfo, by="PrimerName") %>% select(SangerSeqNo, Orientation)
 ```
 
@@ -69,6 +70,9 @@ fill_colour_df=data.frame(value=factor(c("wt/wt", "wt/mut", "GT/wt", "GT/mut", "
 refsequence=DNAString(reftable$Sequence[1])
 refsequence_RC = reverseComplement(refsequence)
 ref_len=nchar(as.character(refsequence))
+
+#acquire search term for mutation analysis
+search_term_mut = as.character(subseq(refsequence, start=as.integer(DSBinfo[[1,1]]-DSBinfo[[1,2]]), width=20))
 
 #make empty dataframes
 Total_data = tibble(Name = NULL,
@@ -249,11 +253,45 @@ for (i in row.names(sites)){
 
   
 }
+
+#Find mutations independent of the GT sites
+  #only use the forward sequences
+  if (current_orientation == "FW"){
+    #find the search term in the SecSeq, allowing 2 mismatches, and acquire its position
+    MatchSec_mut = matchPattern(search_term_mut, SecSeq, max.mismatch = 2)
+    if (length(MatchSec_mut) == 1){
+      Position_match_seq_mut = MatchSec_mut@ranges@start
+      #Add distance to DSB plus 10bp, then acquire the 20bp from the SecSeq from there
+      Post_DSB_seq = as.character(subseq(SecSeq, start=Position_match_seq_mut+DSBinfo[[1,2]]+21, width=20))
+      #then search that sequence in the ref sequence, allowing 2 mismatches, and acquire the position
+      MatchSec_postmut = matchPattern(Post_DSB_seq, refsequence, max.mismatch = 2)
+      if (length(MatchSec_postmut) == 1){
+        Position_postmut = MatchSec_postmut@ranges@start
+        #then calculate the discrepancy. positive is an overall insertion. negative is an overall deletion.
+        shift = as.integer(Position_postmut - (DSBinfo[[1,1]]+21))
+      }else{
+        shift = as.integer(99999999)
+      }
+    }else{
+      shift = as.integer(99999999)
+      Post_DSB_seq = ""
+    }
+  }else{
+    shift = as.integer(99999999)  
+    Post_DSB_seq = ""
+  }
+
+
 Subtotal_data_names = Subtotal_data %>% 
-    mutate(SangerSeqNo = clean_ab1_name_2)
+    mutate(SangerSeqNo = clean_ab1_name_2,
+           PostDSBseq = Post_DSB_seq,
+           Shift = shift)
+
+
+
+
 
 Total_data = rbind(Total_data, Subtotal_data_names)
-
 }
 #############################################################################################
 #interpreting the outcomes & changing format
@@ -275,7 +313,7 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   mutate(Strict = strict)
   
   #Change the format of the data
-  Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype)
+  Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype, Shift)
   Total_trans = spread(Data_clean, Name, Genotype)
   
   #add sample and parent info
@@ -283,12 +321,7 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
   Total_trans_primer = left_join(Total_trans_parents, dna_orient, by="SangerSeqNo")  
   
-#########################################################################################################  
-#Find mutations independent of the GT sites
-#########################################################################################################
-  
-  
-  
+
   
 ######################################################################################################### 
 #then show the data per sample per locus
@@ -384,11 +417,32 @@ for (i in row.names(Total_seq_rxns)) {
     Total_consensus = left_join(Total_consensus, Consensus, by = c("DNASample", "Locus"))
     
   }
+  #summarize shift info
+  #summarize so that there is not a sequence per row, but a distinct outcome per row
+    Subset_working_shift = Total_trans_parents %>%
+      select(DNASample, Locus, SangerSeqNo, Shift) %>%
+      filter(DNASample == Sample_name) %>%
+      filter(Locus == Locus_name) %>%
+      group_by(across(c(-SangerSeqNo))) %>%
+      summarize(no_observations = n()) %>%
+      arrange(desc(no_observations))
+  
+    #remove unknown shift and calculate average shift
+      Subset_working_shift_2 = Subset_working_shift %>% filter(Shift != 99999999) %>%
+        group_by(DNASample, Locus)%>%
+        summarize(Shift_avg = mean(Shift))
+    
+      if (nrow(Subset_working_shift_2)>0){
+    Total_consensus2 = Total_consensus %>% left_join(Subset_working_shift_2, by=c("DNASample", "Locus"))
+      }else{
+        Total_consensus2 = Total_consensus %>% mutate(Shift_avg = 99999999)
+      }
+  
   #combine data from different samples
   if (exists("Total_ultimate") == TRUE) {
-    Total_ultimate = rbind(Total_ultimate, Total_consensus)
+    Total_ultimate = rbind(Total_ultimate, Total_consensus2)
   } else{
-    Total_ultimate = Total_consensus
+    Total_ultimate = Total_consensus2
   }
 }
 
