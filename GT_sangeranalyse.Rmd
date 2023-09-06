@@ -21,6 +21,7 @@ reftable=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="referen
 primerinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="primers")
 parentinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="dnasample_parents")
 DSBinfo=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="DSB")
+filterproblem=read.xlsx(paste0(input_dir, "SangerAnalysisInput.xlsx"), sheet="filter")
 dna_orient = left_join(dna_samples, primerinfo, by="PrimerName") %>% select(SangerSeqNo, Orientation)
 ```
 
@@ -55,6 +56,9 @@ jsiglevel4=0.001
 fill_colour_df=data.frame(value=factor(c("wt/wt", "wt/mut", "GT/wt", "GT/mut", "GT/GT", "mut/mut", "undetermined")), 
                         fill_colour=factor(c("cornflowerblue", "darkslategray3", "plum", "lightsalmon2", "indianred3", "lightgoldenrod2", "grey")),
                         fill_colour_order=factor(c(1, 2, 3, 4, 5, 6, 7)))
+#make this
+shape_df=data.frame(shape=c(19, 1, NA),
+                    label=c("TRUE", "FALSE", "undetermined"))
 
 
 
@@ -75,20 +79,9 @@ ref_len=nchar(as.character(refsequence))
 search_term_mut = as.character(subseq(refsequence, start=as.integer(DSBinfo[[1,1]]-DSBinfo[[1,2]]), width=20))
 
 #make empty dataframes
-Total_data = tibble(Name = NULL,
-                       Seq1 = NULL,
-                       Seq2 = NULL,
-                       SangerSeq = NULL,
-                       WTseq = NULL,
-                       GTseq = NULL,
-                       before_zone = NULL,
-                       after_zone = NULL)
-Total_data_before = tibble(Name = NULL,
-                       Genotype = NULL,
-                       SangerSeq = NULL)
-Total_data_after = tibble(Name = NULL,
-                       Genotype = NULL,
-                       SangerSeq = NULL)
+Total_data = tibble(Name = NULL)
+Total_data_before = tibble(Name = NULL)
+Total_data_after = tibble(Name = NULL)
 
 files=list.files(path=input_dir, pattern=".ab1$")
 
@@ -106,23 +99,15 @@ current_primer=as.character(dna_samples %>% filter(SangerSeqNo == clean_ab1_name
 current_orientation=as.character(primerinfo %>% filter(PrimerName == current_primer) %>% select(Orientation))
   
 #make empty dataframes
-Subtotal_data = tibble(Name = NULL,
-                       Seq1 = NULL,
-                       Seq2 = NULL,
-                       SangerSeq = NULL,
-                       WTseq = NULL,
-                       GTseq = NULL,
-                       before_zone = NULL,
-                       after_zone = NULL)
-Subtotal_data_before = tibble(Name = NULL,
-                       Genotype = NULL)
-Subtotal_data_after = tibble(Name = NULL,
-                       Genotype = NULL)
+Subtotal_data = tibble(Name = NULL)
+Subtotal_data_before = tibble(Name = NULL)
+Subtotal_data_after = tibble(Name = NULL)
+Subtotal_data_names = tibble(Name = NULL)
 
 #get basecalls from the ab1 file, split in primary and secondary
 abifbasecalls = makeBaseCalls(abif1,ratio=GT_peak_ratio)
   
-#determine what alle is same as the ref and extract the primary and secondary sequences
+#determine what allele is the same as the ref and extract the primary and secondary sequences
 if (current_orientation == "FW"){
 hetseqalleles = try(setAllelePhase(abifbasecalls,refsequence,trim5=50,trim3=300), silent=TRUE)
 }else{
@@ -131,8 +116,41 @@ hetseqalleles = try(setAllelePhase(abifbasecalls,refsequence_RC,trim5=50,trim3=3
 
 #if sequence is really bad, program should skip it and move on
 if (inherits(hetseqalleles,'try-error') == TRUE ){
-  next
-}
+  
+  for (i in row.names(sites)){
+  Site_name = as.character(sites %>% filter(row.names(sites) %in% i) %>% select(Name))
+  Site_start = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Location))
+  GT_Seq =  as.character(sites %>% filter(row.names(sites) %in% i) %>% select(GT))
+  Site_width = nchar(GT_Seq)
+  Insertion = as.integer(sites %>% filter(row.names(sites) %in% i) %>% select(Insertion))
+  
+  #Get the wt seq from the ref (only for the site/region of interest)
+  if (current_orientation == "FW"){
+  WT_Seq = as.character(subseq(refsequence, start=Site_start, width=Site_width))
+  }else{
+    if (Insertion > 0){ 
+      WT_Seq = as.character(subseq(refsequence, start=(Site_start-Insertion), width=Site_width))
+    }else{
+      WT_Seq = as.character(subseq(refsequence, start=Site_start, width=Site_width))
+    }
+  }
+    currentData = data.frame(Name=Site_name,
+                            Seq1="not found",
+                            Seq2="not found",
+                            WTseq=WT_Seq,
+                            GTseq=GT_Seq,
+                            before_zone="unknown",
+                            after_zone="unknown",
+                            SangerSeqNo=clean_ab1_name_2,
+                            PostDSBseq="",
+                            Shift=99999999)
+    
+    Subtotal_data_names = rbind(Subtotal_data_names, currentData)
+
+    
+  }
+
+}else{
 
 PrimSeq = DNAString(hetseqalleles@primarySeq)
 SecSeq = DNAString(hetseqalleles@secondarySeq)
@@ -287,7 +305,7 @@ Subtotal_data_names = Subtotal_data %>%
            PostDSBseq = Post_DSB_seq,
            Shift = shift)
 
-
+}
 
 
 
@@ -300,6 +318,7 @@ Total_data = rbind(Total_data, Subtotal_data_names)
 #list of non-allowed characters
 forbiddenletters="([RYMKSWHBVDN])"
 
+
 #basic interpretation
 Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   str_detect(Seq1, forbiddenletters)==TRUE | str_detect(Seq2, forbiddenletters)==TRUE ~ "undetermined",
@@ -310,19 +329,40 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
   Seq1 == WTseq & Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" ~ "wt/mut",
   TRUE ~ "mut/mut")) %>%
-  mutate(Strict = strict)
+  mutate(Strict = strict)%>%
+  #add primer info
+  left_join(dna_samples, by="SangerSeqNo")
   
+  #filter away problematic primer site combinations
+  no_problems = nrow(filterproblem)
+  for (i in nrow(filterproblem)){
+    problematic_site = filterproblem[[i, 1]]
+    problematic_primer = filterproblem[[i, 2]]
+    
+    #get the problematic site and remove the problematic primer
+    if (exists("Total_data_interp_problemfilter")==TRUE){
+    Total_data_interp_problemfilter_2 = Total_data_interp_problemfilter %>% 
+      mutate(Genotype = case_when(Name == problematic_site & PrimerName == problematic_primer ~ "undetermined",
+                                                       TRUE ~ Genotype))
+    Total_data_interp_problemfilter = Total_data_interp_problemfilter_2
+    }else{
+     Total_data_interp_problemfilter = Total_data_interp %>% 
+      mutate(Genotype = case_when(Name == problematic_site & PrimerName == problematic_primer ~ "undetermined",
+                                                       TRUE ~ Genotype))
+    }
+  }
+
+
   #Change the format of the data
-  Data_clean = Total_data_interp %>% select(Name, SangerSeqNo, Genotype, Shift)
+  Data_clean = Total_data_interp_problemfilter %>% select(Name, SangerSeqNo, Genotype, Shift)
   Total_trans = spread(Data_clean, Name, Genotype)
   
   #add sample and parent info
   Total_trans_samples = merge(Total_trans, dna_samples, by="SangerSeqNo")  
   Total_trans_parents = left_join(Total_trans_samples, parentinfo, by="DNASample")  
-  Total_trans_primer = left_join(Total_trans_parents, dna_orient, by="SangerSeqNo")  
+  Total_trans_primer = left_join(Total_trans_parents, dna_orient, by="SangerSeqNo")
   
 
-  
 ######################################################################################################### 
 #then show the data per sample per locus
 #determine what the outcome should be when not all sequences agree. 
@@ -331,7 +371,7 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
 if (exists("Total_ultimate")){
 rm(Total_ultimate)}
 
-  Total_seq_rxns = Total_trans_parents %>% group_by(DNASample, Locus) %>% summarize(count_reactions = n()) %>%ungroup()
+  Total_seq_rxns = Total_trans_primer %>% group_by(DNASample, Locus) %>% summarize(count_reactions = n()) %>%ungroup()
 
 for (i in row.names(Total_seq_rxns)) {
   #initialize dataframes
@@ -345,7 +385,7 @@ for (i in row.names(Total_seq_rxns)) {
     Site_name = as.character(sites %>% filter(row.names(sites) %in% j) %>% select(Name))
     
     #summarize so that there is not a sequence per row, but a distinct outcome per row
-    Subset_working = Total_trans_parents %>%
+    Subset_working = Total_trans_primer %>%
       select(DNASample, Locus, SangerSeqNo, {{Site_name}}) %>%
       filter(DNASample == Sample_name) %>%
       filter(Locus == Locus_name) %>%
@@ -419,7 +459,7 @@ for (i in row.names(Total_seq_rxns)) {
   }
   #summarize shift info
   #summarize so that there is not a sequence per row, but a distinct outcome per row
-    Subset_working_shift = Total_trans_parents %>%
+    Subset_working_shift = Total_trans_primer %>%
       select(DNASample, Locus, SangerSeqNo, Shift) %>%
       filter(DNASample == Sample_name) %>%
       filter(Locus == Locus_name) %>%
@@ -454,7 +494,7 @@ Total_ultimate_parents = left_join(Total_ultimate, parentinfo, by = c("DNASample
   #write everything into an excel document
 work_book <- createWorkbook()
 addWorksheet(work_book, "Data_detailed")
-writeData(work_book, sheet = 1, Total_data_interp)
+writeData(work_book, sheet = 1, Total_data_interp_problemfilter)
 addWorksheet(work_book, "Data_compact")
 writeData(work_book, sheet = 2, Total_trans_primer)
 addWorksheet(work_book, "Data_summary")
@@ -470,113 +510,163 @@ saveWorkbook(work_book, file = paste0(output_dir, "SangerSeqAnalysis.xlsx"), ove
 #make a figure to display the summarized data
 ```{r}
 #process data
+#note: for the future I may want to change this code to handle different numbers of sites
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
-  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5), names_to = "Site")%>%
+  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>% 
   filter(Genotype!="?")%>%
   filter(!is.na(T2))%>%
-  mutate(y_pos = case_when(Site == "Site_1" ~ 1,
+  filter(Locus == "PPO_endo") %>%
+  mutate(x_pos = case_when(Site == "Site_1" ~ 1,
                            Site == "Site_2" ~ 2,
                            Site == "Site_3" ~ 3,
                            Site == "Site_4" ~ 4,
-                           Site == "Site_5" ~ 5)) %>%
+                           Site == "Site_5" ~ 5,
+                           Site == "Site_6" ~ 6)) %>%
   mutate(T2 = as.integer(T2))%>%
   mutate(F1 = as.integer(F1))%>%
   mutate(F2 = as.integer(F2))%>%
   arrange(T2, F1, F2) 
   
 alldata_samples = alldata %>% select(DNASample) %>% unique()
-alldata_samples$x_pos_sample = as.integer(row.names(alldata_samples))
+alldata_samples$y_pos_sample = as.integer(row.names(alldata_samples))
 
-alldata_xpos = left_join(alldata, alldata_samples) %>%
+alldata_ypos = left_join(alldata, alldata_samples) %>%
   left_join(fill_colour_df, by="value") 
 
-alldata_xpos_fill_legend = alldata_xpos %>% 
+alldata_ypos_fill_legend = alldata_ypos %>% 
   select(fill_colour, value, fill_colour_order) %>%
   unique()%>%
   arrange(fill_colour_order)
 
 
 #make a dataframe with F2 group positions
-alldata_xpos_F2 = alldata_xpos %>% 
-  select(T2, F1, F2, x_pos_sample) %>%
+alldata_ypos_F2 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
   unique()%>%
   group_by(T2, F1, F2) %>% 
-  summarize(xpos_F2_stop = dplyr::last(x_pos_sample),
+  summarize(ypos_F2_stop = dplyr::last(y_pos_sample),
             count_F2=n())%>%
-  mutate(xpos_F2_start = xpos_F2_stop - (count_F2-1))
+  mutate(ypos_F2_start = ypos_F2_stop - (count_F2-1))
 
 
 #make a dataframe with F1 group positions
-alldata_xpos_F1 = alldata_xpos %>% 
-  select(T2, F1, F2, x_pos_sample) %>%
+alldata_ypos_F1 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
     unique()%>%
   group_by(T2, F1) %>% 
-  summarize(xpos_F1_stop = dplyr::last(x_pos_sample),
+  summarize(ypos_F1_stop = dplyr::last(y_pos_sample),
             count_F1=n())%>%
-  mutate(xpos_F1_start = xpos_F1_stop - (count_F1-1))
+  mutate(ypos_F1_start = ypos_F1_stop - (count_F1-1))
 
 
 #make a dataframe with T2 group positions
-alldata_xpos_T2 = alldata_xpos %>% 
-  select(T2, F1, F2, x_pos_sample) %>%
+alldata_ypos_T2 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
     unique()%>%
   group_by(T2) %>% 
-  summarize(xpos_T2_stop = dplyr::last(x_pos_sample),
+  summarize(ypos_T2_stop = dplyr::last(y_pos_sample),
             count_T2=n())%>%
-  mutate(xpos_T2_start = xpos_T2_stop - (count_T2-1))
+  mutate(ypos_T2_start = ypos_T2_stop - (count_T2-1))
 
-alldata_combined1=left_join(alldata_xpos, alldata_xpos_F2)
-alldata_combined2=left_join(alldata_combined1, alldata_xpos_F1)
-alldata_combined3=left_join(alldata_combined2, alldata_xpos_T2)
+alldata_combined1=left_join(alldata_ypos, alldata_ypos_F2)
+alldata_combined2=left_join(alldata_combined1, alldata_ypos_F1)
+alldata_combined3=left_join(alldata_combined2, alldata_ypos_T2)
 
+#to get properly formatted genotypes
 tebwt=expression(italic(TEB)^"+/+")
 tebmut=expression(italic(TEB)^"-/-")
 
+#for ectopic and deletion info
+data_ect_del = read.xlsx(paste0(input_dir, "ectopic_and_deletion.xlsx"), sheet="Sheet1")
+
+alldata_combined4 = left_join(alldata_combined3, data_ect_del, by="DNASample")%>%
+  mutate(ectopic_colour = case_when(ectopic == "No" ~ "black",
+                                   ectopic == "Yes" ~ "black",
+                                   TRUE ~ "white")) %>%
+  mutate(ectopic_fill = case_when(ectopic == "No" ~ "white",
+                                   ectopic == "Yes" ~ "indianred3",
+                                   TRUE ~ "white")) %>%
+  mutate(deletion_colour = case_when(deletion == "No" ~ "black",
+                                   deletion == "Yes" ~ "black",
+                                   TRUE ~ "white")) %>%
+mutate(deletion_fill = case_when(deletion == "No" ~ "white",
+                                   deletion == "Yes" ~ "darkturquoise",
+                                   TRUE ~ "white")) %>%
+    mutate(ectopic_shape = case_when(ectopic == "No" ~ 1,
+                                   ectopic == "Yes" ~ 19,
+                                   TRUE ~ NA)) %>%
+  mutate(deletion_shape = case_when(deletion == "No" ~ 1,
+                                   deletion == "Yes" ~ 19,
+                                   TRUE ~ NA)) 
+
+no_sites = 6
+
 #draw a stacked bar chart
-plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
-  geom_tile(aes(x=x_pos_sample, y=y_pos), height=1, width=1, linewidth=0)+
-  geom_segment(aes(x=0.5, xend=0.5, y=0.5, yend=5.5))+
-  geom_segment(aes(x=xpos_F2_stop+0.5, xend=xpos_F2_stop+0.5, y=0.5, yend=5.5))+
-  geom_segment(aes(x=xpos_F2_start-0.25, xend=xpos_F2_stop+0.25, y=0.25, yend=0.25))+
-  geom_text(aes(x=(xpos_F2_start+xpos_F2_stop)/2, y=0.05, label=F2, colour=Genotype), size=geom.text.size)+
-  geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=-0.25, yend=-0.25))+
-  geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=-0.45, label=F1), size=geom.text.size)+
-  geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.75, yend=-0.75))+
-  geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.95, label=T2), size=geom.text.size)+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=2.5, yend=2.5))+
-  geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=4.5, yend=4.5))+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=5.5, yend=5.5))+  
-  annotate("text", label="F2", x=-1, y=0.05, size=geom.text.size)+
-  annotate("text", label="F1", x=-1, y=-0.45, size=geom.text.size)+
-  annotate("text", label="T2", x=-1, y=-0.95, size=geom.text.size)+
-  #fix below
-  scale_fill_identity(guide="legend", breaks=alldata_xpos_fill_legend$fill_colour, labels=alldata_xpos_fill_legend$value)+
+plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
+  #the colored rectangles
+  geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
+  #vert line at start
+  geom_segment(aes(y=0.5, yend=0.5, x=0.5, xend=no_sites+0.5))+
+  #vert lines around F2 groups
+  geom_segment(aes(y=ypos_F2_stop+0.5, yend=ypos_F2_stop+0.5, x=0.5, xend=no_sites+0.5))+
+  #horizontal lines below plot for F2 groups
+  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=8.5, xend=8.5))+
+  #F2 names below plot
+  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=9, label=F2, colour=Genotype), size=geom.text.size)+
+  #horizontal F1 group lines below plot
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=9.5, xend=9.5))+
+  #F1 names below plot
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=10, label=F1), size=geom.text.size)+
+  #horizontal T2 group lines below plot
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=10.5, xend=10.5))+
+  #T2 names below plot
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=11, label=T2), size=geom.text.size)+
+  #horizontal lines separating the sites
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=2.5, xend=2.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=3.5, xend=3.5))+  
+  geom_segment(aes(y=0, yend=max(alldata_ypos$y_pos_sample)+1, x=4.5, xend=4.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=5.5, xend=5.5))+  
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=6.5, xend=6.5))+  
+  #DSB position dashed horizontal line
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
+  #legend for info below plot
+  annotate("text", label="Ect.", y=-1, x=7, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="Del.", y=-1, x=8, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=9, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=10, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=11, size=geom.text.size, hjust=0.5)+
+  #rectangle color legend
+  scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
   scale_color_manual(name="F2 bkgd:", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
-  scale_y_continuous(breaks=c(1,2,3,4,5), labels=c(1,2,3,4,5))+
-  labs(y="                        Site", fill="")+
+  scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
+  labs(x="Site", y="F3 individuals", fill="", shape="")+
     theme(panel.border = element_blank(), 
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
-        axis.title=element_text(size=theme.size, vjust=0.5), 
+        axis.title=element_text(size=theme.size), 
         axis.ticks = element_blank(),
-        axis.text.x = element_blank(),
-        axis.title.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(hjust = 0.3),
+        axis.text.x = element_text(colour="black"),
         plot.title=element_text(size=theme.size), 
         strip.text=element_text(size=theme.size),
         strip.background = element_blank(),
-        text=element_text(family="Verdana"),
+        text=element_text(family="Verdana", colour="black"),
         legend.position = "top",
         legend.justification="right")+
+  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
+  #draw a circle to indicate ectopic GT
+  geom_point(aes(y=y_pos_sample, x=7, shape=ectopic_shape), size=1)+
+  #draw a circle to deletions
+  geom_point(aes(y=y_pos_sample, x=8, shape=deletion_shape), size=1)+
 
-  coord_cartesian(ylim=c(-1.2, 5.5), expand=FALSE, clip="off")
+  coord_cartesian(xlim=c(-0, no_sites+5.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=9, height=4)
+ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=5, height=11)
 
 
 
@@ -585,107 +675,156 @@ ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=9, height
 ```{r}
 #process data
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
-  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5), names_to = "Site")%>%
+  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>%
   filter(Genotype=="?" | is.na(T2))%>%
   filter(DNASample != "38_1" & DNASample != "38_2")%>%
-  mutate(y_pos = case_when(Site == "Site_1" ~ 1,
+  filter(Locus == "PPO_endo") %>%
+  mutate(x_pos = case_when(Site == "Site_1" ~ 1,
                            Site == "Site_2" ~ 2,
                            Site == "Site_3" ~ 3,
                            Site == "Site_4" ~ 4,
-                           Site == "Site_5" ~ 5)) %>%
+                           Site == "Site_5" ~ 5,
+                           Site == "Site_6" ~ 6)) %>%
   mutate(T2 = as.integer(T2))%>%
   mutate(F1 = as.integer(F1))%>%
   mutate(F2 = as.integer(F2))%>%
   arrange(T2, F1, F2) 
   
 alldata_samples = alldata %>% select(DNASample) %>% unique()
-alldata_samples$x_pos_sample = as.integer(row.names(alldata_samples))
+alldata_samples$y_pos_sample = as.integer(row.names(alldata_samples))
 
-alldata_xpos = left_join(alldata, alldata_samples) %>%
+alldata_ypos = left_join(alldata, alldata_samples) %>%
   left_join(fill_colour_df, by="value") 
 
-alldata_xpos_fill_legend = alldata_xpos %>% 
+alldata_ypos_fill_legend = alldata_ypos %>% 
   select(fill_colour, value, fill_colour_order) %>%
   unique()%>%
   arrange(fill_colour_order)
 
 
 #make a dataframe with F2 group positions
-alldata_xpos_F2 = alldata_xpos %>% 
-  select(T2, F1, F2, x_pos_sample) %>%
+alldata_ypos_F2 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
   unique()%>%
   group_by(T2, F1, F2) %>% 
-  summarize(xpos_F2_stop = dplyr::last(x_pos_sample),
+  summarize(ypos_F2_stop = dplyr::last(y_pos_sample),
             count_F2=n())%>%
-  mutate(xpos_F2_start = xpos_F2_stop - (count_F2-1))
+  mutate(ypos_F2_start = ypos_F2_stop - (count_F2-1))
 
 
 #make a dataframe with F1 group positions
-alldata_xpos_F1 = alldata_xpos %>% 
-  select(T2, F1, F2, x_pos_sample) %>%
+alldata_ypos_F1 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
     unique()%>%
   group_by(T2, F1) %>% 
-  summarize(xpos_F1_stop = dplyr::last(x_pos_sample),
+  summarize(ypos_F1_stop = dplyr::last(y_pos_sample),
             count_F1=n())%>%
-  mutate(xpos_F1_start = xpos_F1_stop - (count_F1-1))
+  mutate(ypos_F1_start = ypos_F1_stop - (count_F1-1))
 
 
 #make a dataframe with T2 group positions
-alldata_xpos_T2 = alldata_xpos %>% 
-  select(T2, F1, F2, x_pos_sample) %>%
+alldata_ypos_T2 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
     unique()%>%
   group_by(T2) %>% 
-  summarize(xpos_T2_stop = dplyr::last(x_pos_sample),
+  summarize(ypos_T2_stop = dplyr::last(y_pos_sample),
             count_T2=n())%>%
-  mutate(xpos_T2_start = xpos_T2_stop - (count_T2-1))
+  mutate(ypos_T2_start = ypos_T2_stop - (count_T2-1))
 
-alldata_combined1=left_join(alldata_xpos, alldata_xpos_F2)
-alldata_combined2=left_join(alldata_combined1, alldata_xpos_F1)
-alldata_combined3=left_join(alldata_combined2, alldata_xpos_T2)
+alldata_combined1=left_join(alldata_ypos, alldata_ypos_F2)
+alldata_combined2=left_join(alldata_combined1, alldata_ypos_F1)
+alldata_combined3=left_join(alldata_combined2, alldata_ypos_T2)
 
 tebwt=expression(italic(TEB)^"+/+")
 tebmut=expression(italic(TEB)^"-/-")
 
+#for ectopic and deletion info
+data_ect_del = read.xlsx(paste0(input_dir, "ectopic_and_deletion.xlsx"), sheet="Sheet1")
+
+alldata_combined4 = left_join(alldata_combined3, data_ect_del, by="DNASample")%>%
+  mutate(ectopic_colour = case_when(ectopic == "No" ~ "black",
+                                   ectopic == "Yes" ~ "black",
+                                   TRUE ~ "white")) %>%
+  mutate(ectopic_fill = case_when(ectopic == "No" ~ "white",
+                                   ectopic == "Yes" ~ "indianred3",
+                                   TRUE ~ "white")) %>%
+  mutate(deletion_colour = case_when(deletion == "No" ~ "black",
+                                   deletion == "Yes" ~ "black",
+                                   TRUE ~ "white")) %>%
+mutate(deletion_fill = case_when(deletion == "No" ~ "white",
+                                   deletion == "Yes" ~ "darkturquoise",
+                                   TRUE ~ "white")) %>%
+    mutate(ectopic_shape = case_when(ectopic == "No" ~ 1,
+                                   ectopic == "Yes" ~ 19,
+                                   TRUE ~ NA)) %>%
+  mutate(deletion_shape = case_when(deletion == "No" ~ 1,
+                                   deletion == "Yes" ~ 19,
+                                   TRUE ~ NA)) 
+
+no_sites = 6
+
 #draw a stacked bar chart
-plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
-  geom_tile(aes(x=x_pos_sample, y=y_pos), height=1, width=1, linewidth=0)+
-  geom_segment(aes(x=0.5, xend=0.5, y=0.5, yend=5.5))+
-  geom_segment(aes(x=xpos_F1_stop+0.5, xend=xpos_F1_stop+0.5, y=0.5, yend=5.5))+
-  geom_segment(aes(x=xpos_F1_start-0.25, xend=xpos_F1_stop+0.25, y=0.25, yend=0.25))+
-  geom_text(aes(x=(xpos_F1_start+xpos_F1_stop)/2, y=0.05, label=F1), size=geom.text.size)+
-  geom_segment(aes(x=xpos_T2_start-0.25, xend=xpos_T2_stop+0.25, y=-0.25, yend=-0.25))+
-  geom_text(aes(x=(xpos_T2_start+xpos_T2_stop)/2, y=-0.45, label=T2), size=geom.text.size)+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=0.5, yend=0.5))+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=1.5, yend=1.5))+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=2.5, yend=2.5))+
-  geom_segment(aes(x=0, xend=max(alldata_xpos$x_pos_sample)+1, y=3.5, yend=3.5))+  
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=3.5, yend=3.5), colour="white", linetype="dashed")+ 
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=4.5, yend=4.5))+
-  geom_segment(aes(x=0.5, xend=max(alldata_xpos$x_pos_sample)+0.5, y=5.5, yend=5.5))+  
-  annotate("text", label="F1", x=-1, y=0.05, size=geom.text.size)+
-  annotate("text", label="T2", x=-1, y=-0.45, size=geom.text.size)+
-  scale_fill_identity(guide="legend", breaks=alldata_xpos_fill_legend$fill_colour, labels=alldata_xpos_fill_legend$value)+
-  scale_y_continuous(breaks=c(1,2,3,4,5), labels=c(1,2,3,4,5))+
-  labs(y="                        Site", fill="")+
+plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
+  #the colored rectangles
+  geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
+  #vert line at start
+  geom_segment(aes(y=0.5, yend=0.5, x=0.5, xend=no_sites+0.5))+
+  #vert line around F1 groups
+  geom_segment(aes(y=ypos_F1_stop+0.5, yend=ypos_F1_stop+0.5, x=0.5, xend=no_sites+0.5))+
+  #horizontal lines below for F1 groups
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=8.5, xend=8.5))+
+  #F1 names below
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9, label=F1), size=geom.text.size)+
+  #horizontal lines below for T2 groups
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=9.5, xend=9.5))+
+  #T2 names below
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10, label=T2), size=geom.text.size)+
+  #horizontal lines separating the sites
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=2.5, xend=2.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=3.5, xend=3.5))+  
+  geom_segment(aes(y=0, yend=max(alldata_ypos$y_pos_sample)+1, x=4.5, xend=4.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=5.5, xend=5.5))+  
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=6.5, xend=6.5))+  
+  #DSB position dashed horizontal line
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
+  #legend for info below plot
+  annotate("text", label="Ect.", y=-1, x=7, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="Del.", y=-1, x=8, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=9, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=10, size=geom.text.size, hjust=0.5)+
+  #rectangle color legend
+  #rectangle color legend
+  scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
+  #scale_color_manual(name="F2 bkgd:", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
+  scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
+  labs(x="Site", y="F2 individuals", fill="", shape="")+
     theme(panel.border = element_blank(), 
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
-        axis.title=element_text(size=theme.size, vjust=0.5), 
+        axis.title=element_text(size=theme.size), 
         axis.ticks = element_blank(),
-        axis.text.x = element_blank(),
-        axis.title.x = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.x = element_text(hjust = 0.3),
+        axis.text.x = element_text(colour="black"),
         plot.title=element_text(size=theme.size), 
         strip.text=element_text(size=theme.size),
         strip.background = element_blank(),
-        text=element_text(family="Verdana"),
+        text=element_text(family="Verdana", colour="black"),
         legend.position = "top",
         legend.justification="right")+
+  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
+  #draw a circle to indicate ectopic GT
+  #geom_point(aes(y=y_pos_sample, x=7, shape=ectopic_shape), size=1)+
+  #draw a circle to deletions
+# geom_point(aes(y=y_pos_sample, x=8, shape=deletion_shape), size=1)+
 
-  coord_cartesian(ylim=c(-1.2, 5.5), expand=FALSE, clip="off")
+  coord_cartesian(xlim=c(-0, no_sites+5.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=8, height=4)
+ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=4, height=8)
 
 
 
