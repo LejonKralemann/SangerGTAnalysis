@@ -85,6 +85,17 @@ Total_data_after = tibble(Name = NULL)
 
 files=list.files(path=input_dir, pattern=".ab1$")
 
+#check whether the list of samples matches the list of the actual files
+for (j in files){
+  clean_ab1_name = str_replace(j, "_premix.ab1", "")
+clean_ab1_name_2 = str_replace(clean_ab1_name, ".ab1", "")
+ if (clean_ab1_name_2 %in% dna_samples$SangerSeqNo){
+   next
+ } else{
+   stop(paste0("Filename ", clean_ab1_name_2, " not found in SangerAnalysisInput - sangerseqno_dnasample"))
+ }
+}
+
 for (j in files){
 
 #get the sanger sequencing data
@@ -573,54 +584,31 @@ alldata_combined2=left_join(alldata_combined1, alldata_ypos_F1)
 alldata_combined3=left_join(alldata_combined2, alldata_ypos_T2)
 
 #to get properly formatted genotypes
-tebwt=expression(italic(TEB)^"+/+")
-tebmut=expression(italic(TEB)^"-/-")
-
-#for ectopic and deletion info
-data_ect_del = read.xlsx(paste0(input_dir, "ectopic_and_deletion.xlsx"), sheet="Sheet1")
-
-alldata_combined4 = left_join(alldata_combined3, data_ect_del, by="DNASample")%>%
-  mutate(ectopic_colour = case_when(ectopic == "No" ~ "black",
-                                   ectopic == "Yes" ~ "black",
-                                   TRUE ~ "white")) %>%
-  mutate(ectopic_fill = case_when(ectopic == "No" ~ "white",
-                                   ectopic == "Yes" ~ "indianred3",
-                                   TRUE ~ "white")) %>%
-  mutate(deletion_colour = case_when(deletion == "No" ~ "black",
-                                   deletion == "Yes" ~ "black",
-                                   TRUE ~ "white")) %>%
-mutate(deletion_fill = case_when(deletion == "No" ~ "white",
-                                   deletion == "Yes" ~ "darkturquoise",
-                                   TRUE ~ "white")) %>%
-    mutate(ectopic_shape = case_when(ectopic == "No" ~ 1,
-                                   ectopic == "Yes" ~ 19,
-                                   TRUE ~ NA)) %>%
-  mutate(deletion_shape = case_when(deletion == "No" ~ 1,
-                                   deletion == "Yes" ~ 19,
-                                   TRUE ~ NA)) 
+tebwt = "*TEB*<sup>+/+</sup>"
+tebmut= "*TEB*<sup>-/-</sup>"
 
 no_sites = 6
 
 #draw a stacked bar chart
-plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
+plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
   #the colored rectangles
   geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
   #vert line at start
   geom_segment(aes(y=0.5, yend=0.5, x=0.5, xend=no_sites+0.5))+
   #vert lines around F2 groups
   geom_segment(aes(y=ypos_F2_stop+0.5, yend=ypos_F2_stop+0.5, x=0.5, xend=no_sites+0.5))+
-  #horizontal lines below plot for F2 groups
-  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=8.5, xend=8.5))+
-  #F2 names below plot
-  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=9, label=F2, colour=Genotype), size=geom.text.size)+
-  #horizontal F1 group lines below plot
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=9.5, xend=9.5))+
-  #F1 names below plot
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=10, label=F1), size=geom.text.size)+
-  #horizontal T2 group lines below plot
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=10.5, xend=10.5))+
-  #T2 names below plot
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=11, label=T2), size=geom.text.size)+
+  #horizontal lines next to plot for F2 groups
+  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=7, xend=7))+
+  #F2 names next to plot
+  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=7.5, label=F2, colour=Genotype), size=geom.text.size)+
+  #horizontal F1 group lines next to plot
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=8, xend=8))+
+  #F1 names next to plot
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=8.5, label=F1), size=geom.text.size)+
+  #horizontal T2 group lines next to plot
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=9, xend=9))+
+  #T2 names next to plot
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=9.5, label=T2), size=geom.text.size)+
   #horizontal lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
@@ -632,41 +620,34 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
   #DSB position dashed horizontal line
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
-  annotate("text", label="Ect.", y=-1, x=7, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="Del.", y=-1, x=8, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F2", y=-1, x=9, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F1", y=-1, x=10, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=11, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=9.5, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
-  scale_color_manual(name="F2 bkgd:", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
+  scale_color_manual(name="", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
   scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
   labs(x="Site", y="F3 individuals", fill="", shape="")+
+  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
     theme(panel.border = element_blank(), 
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
-        axis.title=element_text(size=theme.size), 
+        text = element_text(family="Verdana", colour="black", size=theme.size),
         axis.ticks = element_blank(),
         axis.text.y = element_blank(),
-        axis.title.x = element_text(hjust = 0.3),
-        axis.text.x = element_text(colour="black"),
-        plot.title=element_text(size=theme.size), 
-        strip.text=element_text(size=theme.size),
+        axis.text.x = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.title.x = element_text(hjust = 0.3, colour="black", size=theme.size),
         strip.background = element_blank(),
-        text=element_text(family="Verdana", colour="black"),
-        legend.position = "top",
-        legend.justification="right")+
-  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
-  #draw a circle to indicate ectopic GT
-  geom_point(aes(y=y_pos_sample, x=7, shape=ectopic_shape), size=1)+
-  #draw a circle to deletions
-  geom_point(aes(y=y_pos_sample, x=8, shape=deletion_shape), size=1)+
+        legend.position = "right",
+        legend.justification = "left",
+        legend.direction = "vertical",
+        legend.text = element_markdown())+
 
-  coord_cartesian(xlim=c(-0, no_sites+5.5), expand=FALSE, clip="off")
+  coord_cartesian(xlim=c(-0, no_sites+3.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=5, height=11)
+ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=14, height=30, units = "cm", dpi = "print")
 
 
 
@@ -772,13 +753,13 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
   #vert line around F1 groups
   geom_segment(aes(y=ypos_F1_stop+0.5, yend=ypos_F1_stop+0.5, x=0.5, xend=no_sites+0.5))+
   #horizontal lines below for F1 groups
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=8.5, xend=8.5))+
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=7.5, xend=7.5))+
   #F1 names below
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9, label=F1), size=geom.text.size)+
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=8, label=F1), size=geom.text.size)+
   #horizontal lines below for T2 groups
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=9.5, xend=9.5))+
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=8.5, xend=8.5))+
   #T2 names below
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10, label=T2), size=geom.text.size)+
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=9, label=T2), size=geom.text.size)+
   #horizontal lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
@@ -791,9 +772,8 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
   annotate("text", label="Ect.", y=-1, x=7, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="Del.", y=-1, x=8, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F1", y=-1, x=9, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=10, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=8, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=9, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
@@ -818,9 +798,6 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
   scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
   #draw a circle to indicate ectopic GT
   #geom_point(aes(y=y_pos_sample, x=7, shape=ectopic_shape), size=1)+
-  #draw a circle to deletions
-# geom_point(aes(y=y_pos_sample, x=8, shape=deletion_shape), size=1)+
-
   coord_cartesian(xlim=c(-0, no_sites+5.5), expand=FALSE, clip="off")
 
 plt
