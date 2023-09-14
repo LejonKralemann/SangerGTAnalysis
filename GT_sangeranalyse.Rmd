@@ -9,6 +9,7 @@ library(Biostrings)
 library(sangerseqR)
 library(reshape2)
 library(svglite)
+library(exactRankTests)
 
 #set paths
 input_dir= "./input/"
@@ -583,6 +584,8 @@ alldata_combined1=left_join(alldata_ypos, alldata_ypos_F2)
 alldata_combined2=left_join(alldata_combined1, alldata_ypos_F1)
 alldata_combined3=left_join(alldata_combined2, alldata_ypos_T2)
 
+alldata_combined3$DNASample = str_replace_all(alldata_combined3$DNASample, pattern="_", replacement="-")
+
 #to get properly formatted genotypes
 tebwt = "*TEB*<sup>+/+</sup>"
 tebmut= "*TEB*<sup>-/-</sup>"
@@ -593,23 +596,27 @@ no_sites = 6
 plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
   #the colored rectangles
   geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
-  #vert line at start
+  #horizontal line at start
   geom_segment(aes(y=0.5, yend=0.5, x=0.5, xend=no_sites+0.5))+
-  #vert lines around F2 groups
+  #horizontal lines around F2 groups
   geom_segment(aes(y=ypos_F2_stop+0.5, yend=ypos_F2_stop+0.5, x=0.5, xend=no_sites+0.5))+
-  #horizontal lines next to plot for F2 groups
-  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=7, xend=7))+
+  #vertical F3 lines
+  geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=7, xend=7))+
+  #F3 names next to plot
+  geom_text(aes(y=y_pos_sample, x=7.5, label=DNASample, colour=Genotype), size=geom.text.size)+
+  #vertical lines next to plot for F2 groups
+  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=8, xend=8))+
   #F2 names next to plot
-  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=7.5, label=F2, colour=Genotype), size=geom.text.size)+
-  #horizontal F1 group lines next to plot
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=8, xend=8))+
+  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=8.5, label=F2, colour=Genotype), size=geom.text.size)+
+  #vertical F1 group lines next to plot
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=9, xend=9))+
   #F1 names next to plot
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=8.5, label=F1), size=geom.text.size)+
-  #horizontal T2 group lines next to plot
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=9, xend=9))+
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9.5, label=F1), size=geom.text.size)+
+  #vertical T2 group lines next to plot
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=10, xend=10))+
   #T2 names next to plot
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=9.5, label=T2), size=geom.text.size)+
-  #horizontal lines separating the sites
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10.5, label=T2), size=geom.text.size)+
+  #vertical lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=2.5, xend=2.5))+
@@ -620,14 +627,15 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   #DSB position dashed horizontal line
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
-  annotate("text", label="F2", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F1", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=9.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F3", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=9.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=10.5, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
   scale_color_manual(name="", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
   scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
-  labs(x="Site", y="F3 individuals", fill="", shape="")+
+  labs(x="Site", y="", fill="", shape="")+
   scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
     theme(panel.border = element_blank(), 
         panel.grid.major = element_blank(), 
@@ -642,9 +650,9 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
         legend.position = "right",
         legend.justification = "left",
         legend.direction = "vertical",
-        legend.text = element_markdown())+
+        legend.text = element_markdown(size=theme.size))+
 
-  coord_cartesian(xlim=c(-0, no_sites+3.5), expand=FALSE, clip="off")
+  coord_cartesian(xlim=c(-0, no_sites+4.5), expand=FALSE, clip="off")
 
 plt
 ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=14, height=30, units = "cm", dpi = "print")
@@ -719,33 +727,10 @@ alldata_combined3=left_join(alldata_combined2, alldata_ypos_T2)
 tebwt=expression(italic(TEB)^"+/+")
 tebmut=expression(italic(TEB)^"-/-")
 
-#for ectopic and deletion info
-data_ect_del = read.xlsx(paste0(input_dir, "ectopic_and_deletion.xlsx"), sheet="Sheet1")
-
-alldata_combined4 = left_join(alldata_combined3, data_ect_del, by="DNASample")%>%
-  mutate(ectopic_colour = case_when(ectopic == "No" ~ "black",
-                                   ectopic == "Yes" ~ "black",
-                                   TRUE ~ "white")) %>%
-  mutate(ectopic_fill = case_when(ectopic == "No" ~ "white",
-                                   ectopic == "Yes" ~ "indianred3",
-                                   TRUE ~ "white")) %>%
-  mutate(deletion_colour = case_when(deletion == "No" ~ "black",
-                                   deletion == "Yes" ~ "black",
-                                   TRUE ~ "white")) %>%
-mutate(deletion_fill = case_when(deletion == "No" ~ "white",
-                                   deletion == "Yes" ~ "darkturquoise",
-                                   TRUE ~ "white")) %>%
-    mutate(ectopic_shape = case_when(ectopic == "No" ~ 1,
-                                   ectopic == "Yes" ~ 19,
-                                   TRUE ~ NA)) %>%
-  mutate(deletion_shape = case_when(deletion == "No" ~ 1,
-                                   deletion == "Yes" ~ 19,
-                                   TRUE ~ NA)) 
-
 no_sites = 6
 
 #draw a stacked bar chart
-plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
+plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
   #the colored rectangles
   geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
   #vert line at start
@@ -753,13 +738,13 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
   #vert line around F1 groups
   geom_segment(aes(y=ypos_F1_stop+0.5, yend=ypos_F1_stop+0.5, x=0.5, xend=no_sites+0.5))+
   #horizontal lines below for F1 groups
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=7.5, xend=7.5))+
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=7, xend=7))+
   #F1 names below
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=8, label=F1), size=geom.text.size)+
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=7.5, label=F1), size=geom.text.size)+
   #horizontal lines below for T2 groups
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=8.5, xend=8.5))+
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=8, xend=8))+
   #T2 names below
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=9, label=T2), size=geom.text.size)+
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=8.5, label=T2), size=geom.text.size)+
   #horizontal lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
@@ -771,9 +756,8 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
   #DSB position dashed horizontal line
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
-  annotate("text", label="Ect.", y=-1, x=7, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F1", y=-1, x=8, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=9, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
@@ -784,29 +768,307 @@ plt=ggplot(data=alldata_combined4, aes(fill=fill_colour), colour="black", linewi
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
         panel.background = element_blank(), 
-        axis.title=element_text(size=theme.size), 
+        text = element_text(family="Verdana", colour="black", size=theme.size),
         axis.ticks = element_blank(),
         axis.text.y = element_blank(),
-        axis.title.x = element_text(hjust = 0.3),
-        axis.text.x = element_text(colour="black"),
-        plot.title=element_text(size=theme.size), 
-        strip.text=element_text(size=theme.size),
+        axis.text.x = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.title.x = element_text(hjust = 0.3, colour="black", size=theme.size),
         strip.background = element_blank(),
-        text=element_text(family="Verdana", colour="black"),
-        legend.position = "top",
-        legend.justification="right")+
-  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
-  #draw a circle to indicate ectopic GT
-  #geom_point(aes(y=y_pos_sample, x=7, shape=ectopic_shape), size=1)+
-  coord_cartesian(xlim=c(-0, no_sites+5.5), expand=FALSE, clip="off")
+        legend.position = "right",
+        legend.justification = "left",
+        legend.direction = "vertical",
+        legend.text = element_markdown(size=theme.size))+
+  coord_cartesian(xlim=c(-0, no_sites+2.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), plot=plt, width=4, height=8)
+ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), width=14, height=10, units = "cm", dpi = "print")
+
+
+
+```
+#make a figure to display the summarized data of the ectopic GT events
+```{r}
+#process data
+#note: for the future I may want to change this code to handle different numbers of sites
+alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
+  pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>% 
+  filter(Genotype!="?")%>%
+  filter(!is.na(T2))%>%
+  filter(Locus == "PPO_exo") %>%
+  mutate(x_pos = case_when(Site == "Site_1" ~ 1,
+                           Site == "Site_2" ~ 2,
+                           Site == "Site_3" ~ 3,
+                           Site == "Site_4" ~ 4,
+                           Site == "Site_5" ~ 5,
+                           Site == "Site_6" ~ 6)) %>%
+  mutate(T2 = as.integer(T2))%>%
+  mutate(F1 = as.integer(F1))%>%
+  mutate(F2 = as.integer(F2))%>%
+  arrange(T2, F1, F2) 
+  
+alldata_samples = alldata %>% select(DNASample) %>% unique()
+alldata_samples$y_pos_sample = as.integer(row.names(alldata_samples))
+
+alldata_ypos = left_join(alldata, alldata_samples) %>%
+  left_join(fill_colour_df, by="value") 
+
+alldata_ypos_fill_legend = alldata_ypos %>% 
+  select(fill_colour, value, fill_colour_order) %>%
+  unique()%>%
+  arrange(fill_colour_order)
+
+
+#make a dataframe with F2 group positions
+alldata_ypos_F2 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
+  unique()%>%
+  group_by(T2, F1, F2) %>% 
+  summarize(ypos_F2_stop = dplyr::last(y_pos_sample),
+            count_F2=n())%>%
+  mutate(ypos_F2_start = ypos_F2_stop - (count_F2-1))
+
+
+#make a dataframe with F1 group positions
+alldata_ypos_F1 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
+    unique()%>%
+  group_by(T2, F1) %>% 
+  summarize(ypos_F1_stop = dplyr::last(y_pos_sample),
+            count_F1=n())%>%
+  mutate(ypos_F1_start = ypos_F1_stop - (count_F1-1))
+
+
+#make a dataframe with T2 group positions
+alldata_ypos_T2 = alldata_ypos %>% 
+  select(T2, F1, F2, y_pos_sample) %>%
+    unique()%>%
+  group_by(T2) %>% 
+  summarize(ypos_T2_stop = dplyr::last(y_pos_sample),
+            count_T2=n())%>%
+  mutate(ypos_T2_start = ypos_T2_stop - (count_T2-1))
+
+alldata_combined1=left_join(alldata_ypos, alldata_ypos_F2)
+alldata_combined2=left_join(alldata_combined1, alldata_ypos_F1)
+alldata_combined3=left_join(alldata_combined2, alldata_ypos_T2)
+
+alldata_combined3$DNASample = str_replace_all(alldata_combined3$DNASample, pattern="_", replacement="-")
+
+#to get properly formatted genotypes
+tebwt = "*TEB*<sup>+/+</sup>"
+tebmut= "*TEB*<sup>-/-</sup>"
+
+no_sites = 6
+
+#draw a stacked bar chart
+plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
+  #the colored rectangles
+  geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
+  #horizontal line at start
+  geom_segment(aes(y=0.5, yend=0.5, x=0.5, xend=no_sites+0.5))+
+  #horizontal lines around F2 groups
+  geom_segment(aes(y=ypos_F2_stop+0.5, yend=ypos_F2_stop+0.5, x=0.5, xend=no_sites+0.5))+
+  #vertical F3 lines
+  geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=7, xend=7))+
+  #F3 names next to plot
+  geom_text(aes(y=y_pos_sample, x=7.5, label=DNASample, colour=Genotype), size=geom.text.size)+
+  #vertical lines next to plot for F2 groups
+  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=8, xend=8))+
+  #F2 names next to plot
+  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=8.5, label=F2, colour=Genotype), size=geom.text.size)+
+  #vertical F1 group lines next to plot
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=9, xend=9))+
+  #F1 names next to plot
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9.5, label=F1), size=geom.text.size)+
+  #vertical T2 group lines next to plot
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=10, xend=10))+
+  #T2 names next to plot
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10.5, label=T2), size=geom.text.size)+
+  #vertical lines separating the sites
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=2.5, xend=2.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=3.5, xend=3.5))+  
+  geom_segment(aes(y=0, yend=max(alldata_ypos$y_pos_sample)+1, x=4.5, xend=4.5))+
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=5.5, xend=5.5))+  
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=6.5, xend=6.5))+  
+  #DSB position dashed horizontal line
+  geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
+  #legend for info below plot
+  annotate("text", label="F3", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=9.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=10.5, size=geom.text.size, hjust=0.5)+
+  #rectangle color legend
+  scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
+  scale_color_manual(name="", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
+  scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
+  labs(x="Site", y="", fill="", shape="")+
+  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
+    theme(panel.border = element_blank(), 
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_blank(), 
+        text = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.ticks = element_blank(),
+        axis.text.y = element_blank(),
+        axis.text.x = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.title.x = element_text(hjust = 0.3, colour="black", size=theme.size),
+        strip.background = element_blank(),
+        legend.position = "right",
+        legend.justification = "left",
+        legend.direction = "vertical",
+        legend.text = element_markdown(size=theme.size))+
+
+  coord_cartesian(xlim=c(-0, no_sites+4.5), expand=FALSE, clip="off")
+
+plt
+ggsave(file=paste0(output_dir, "ectopicGT_stackedbar.png"), plot=plt, width=14, height=5, units = "cm", dpi = "print")
 
 
 
 ```
 
+#gene conversion tract length figure
+```{r}
+#start with site 4. check whether GT/wt or GT/GT.
+#then check how far the same color continues in one direction, and in the other direction.
+#do not use rows with wt/mut, wt/wt, gt/mut, mut/mut, undetermined
+#display the lengths per F2, per genotype.
+
+alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
+  #first get rid of samples where some information is unclear
+  filter(Site_1 != "mut/mut" & Site_2 != "mut/mut" & Site_3 != "mut/mut" & Site_4 != "mut/mut" & Site_5 != "mut/mut" & Site_6 != "mut/mut" )%>%
+  filter(Site_1 != "wt/mut" & Site_2 != "wt/mut" & Site_3 != "wt/mut" & Site_4 != "wt/mut" & Site_5 != "wt/mut" & Site_6 != "wt/mut" )%>%
+  filter(Site_1 != "undetermined" & Site_2 != "undetermined" & Site_3 != "undetermined" & Site_4 != "undetermined" & Site_5 != "undetermined" & Site_6 != "undetermined" )%>%
+  #then get rid of the ones without ATG at codon 426
+  filter(Site_4!="wt/wt")%>%
+  #only look at endogenous locus
+  filter(Locus=="PPO_endo")%>%
+  #simplify the calling
+  mutate(Site_1 = case_when(Site_1 == "GT/GT" | Site_1 == "GT/wt" | Site_1== "GT/mut" ~ TRUE,
+                            TRUE ~ FALSE))%>%
+  mutate(Site_2 = case_when(Site_2 == "GT/GT" | Site_2 == "GT/wt" | Site_2== "GT/mut" ~ TRUE,
+                            TRUE ~ FALSE))%>%
+  mutate(Site_3 = case_when(Site_3 == "GT/GT" | Site_3 == "GT/wt" | Site_3== "GT/mut" ~ TRUE,
+                            TRUE ~ FALSE))%>%
+  mutate(Site_4 = case_when(Site_4 == "GT/GT" | Site_4 == "GT/wt" | Site_4== "GT/mut" ~ TRUE,
+                            TRUE ~ FALSE))%>%
+  mutate(Site_5 = case_when(Site_5 == "GT/GT" | Site_5 == "GT/wt" | Site_5== "GT/mut" ~ TRUE,
+                            TRUE ~ FALSE))%>%
+  mutate(Site_6 = case_when(Site_6 == "GT/GT" | Site_6 == "GT/wt" | Site_6== "GT/mut" ~ TRUE,
+                            TRUE ~ FALSE))%>%
+  mutate(uplen = 99999999,
+         downlen = 99999999)
+
+for (i in row.names(alldata)){
+  number=as.integer(i)
+  site_1_gt = alldata$Site_1[number]
+  site_2_gt = alldata$Site_2[number]
+  site_3_gt = alldata$Site_3[number]
+  site_5_gt = alldata$Site_5[number]
+  site_6_gt = alldata$Site_6[number]
+  
+  if (site_3_gt == TRUE){
+    if (site_2_gt == TRUE){
+      if (site_1_gt == TRUE){
+        alldata$uplen[number]=693
+      }else{
+        alldata$uplen[number]=544
+      }
+    }else{
+      alldata$uplen[number]=429
+    }
+  }else{
+    alldata$uplen[number]=5
+  }
+  if (site_5_gt == TRUE){
+    if (site_6_gt == TRUE){
+      alldata$downlen[number] = 118
+    }else{
+      alldata$downlen[number] = 58
+    }
+  }else{
+    alldata$downlen[number] = 0
+  }
+}
+
+data_figure=alldata %>%
+  filter(Genotype!="?")%>%
+  mutate(uplen=(uplen*-1))%>%
+  rowwise()%>%
+  mutate(parent = paste0(T2, F1, F2))%>%
+  ungroup()%>%
+  group_by(parent, Genotype)%>%
+  summarize(mean_uplen = mean(uplen),
+            sd_uplen = sd(uplen),
+            mean_downlen = mean(downlen),
+            sd_downlen = sd(downlen),
+            n =n())%>%
+  rowwise()%>%
+  mutate(SE_uplen = sd_uplen/sqrt(n),
+         SE_downlen = sd_downlen/sqrt(n))%>%
+  replace_na(list(SE_uplen = 0, SE_downlen = 0))%>%
+  mutate(SE_up = mean_uplen - SE_uplen,
+         SE_down = mean_downlen + SE_downlen)%>%
+  mutate(totallen = mean_downlen + (mean_uplen*-1))%>%
+  ungroup()%>%
+  group_by(Genotype)%>%
+  arrange(totallen, .by_group=TRUE)
+
+data_figure_teb = data_figure %>%
+  filter(Genotype== "teb")
+data_figure_wt = data_figure %>%
+  filter(Genotype== "wt")
+
+data_figure_teb = rownames_to_column(data_figure_teb, "rown")%>%
+  rowwise()%>%
+  mutate(rown = as.integer(rown))
+data_figure_wt = rownames_to_column(data_figure_wt, "rown")%>%
+  rowwise()%>%
+  mutate(rown = as.integer(rown)+3)
+
+data_figure_combined = rbind(data_figure_teb, data_figure_wt)
+
+
+
+plt = ggplot(data=data_figure_combined, aes(y=rown))+
+  geom_col(aes(x=mean_downlen), fill="grey90", col="black", orientation = "y")+
+  geom_col(aes(x=mean_uplen), fill="grey90", col="black", orientation = "y")+
+  labs(x="Mean gene conversion tract length (bp from DSB)", y="F3s grouped by F2 parent")+
+    theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill="white", colour="black"), 
+        text = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.text.x = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.title.x = element_text(colour="black", size=theme.size),
+        strip.background = element_blank(),
+        legend.position = "right",
+        legend.justification = "left",
+        legend.direction = "vertical",
+        legend.text = element_markdown(size=theme.size))+
+  geom_vline(xintercept=-693, lty="dotted", col="red")+
+  geom_vline(xintercept=118, lty="dotted", col="red")+
+  geom_errorbar(aes(xmin=SE_up, xmax = mean_uplen))+
+  geom_errorbar(aes(xmin=mean_downlen, xmax = SE_down))+
+  scale_x_continuous(breaks=seq(from=-700, to=100, by=100))+
+  facet_grid(cols=vars(Genotype))
+
+
+plt
+ggsave(file=paste0(output_dir, "conversion_tract.png"), width=16, height=8, units = "cm", dpi = "print")
+
+
+
+
+#statistical test to determine if teb and wt have different average tract length
+wilcox.exact(data_figure_combined$totallen ~ data_figure_combined$Genotype, paired=FALSE, alternative="two.sided")
+median(data_figure_teb$totallen)
+median(data_figure_wt$totallen)
+
+```
 
 
 
