@@ -311,11 +311,21 @@ for (i in row.names(sites)){
     Post_DSB_seq = ""
   }
 
+if (current_orientation == "FW"){
+  PrimSeqFw = as.character(PrimSeq)
+  SecSeqFW = as.character(SecSeq)
+}else{
+  PrimSeqFw = as.character(reverseComplement(PrimSeq))
+  SecSeqFW = as.character(reverseComplement(SecSeq))
+}
+
 
 Subtotal_data_names = Subtotal_data %>% 
     mutate(SangerSeqNo = clean_ab1_name_2,
            PostDSBseq = Post_DSB_seq,
-           Shift = shift)
+           Shift = shift,
+           Prim_Seq = PrimSeqFw,
+           Sec_Seq = SecSeqFW)
 
 }
 
@@ -366,7 +376,7 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
 
 
   #Change the format of the data
-  Data_clean = Total_data_interp_problemfilter %>% select(Name, SangerSeqNo, Genotype, Shift)
+  Data_clean = Total_data_interp_problemfilter %>% select(Name, SangerSeqNo, Genotype, Shift, Prim_Seq, Sec_Seq)
   Total_trans = spread(Data_clean, Name, Genotype)
   
   #add sample and parent info
@@ -601,21 +611,21 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   #horizontal lines around F2 groups
   geom_segment(aes(y=ypos_F2_stop+0.5, yend=ypos_F2_stop+0.5, x=0.5, xend=no_sites+0.5))+
   #vertical F3 lines
-  geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=7, xend=7))+
+  #geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=6.75, xend=6.75))+
   #F3 names next to plot
-  geom_text(aes(y=y_pos_sample, x=7.5, label=DNASample, colour=Genotype), size=geom.text.size)+
+  geom_text(aes(y=y_pos_sample, x=7, label=DNASample, colour=Genotype), size=geom.text.size)+
   #vertical lines next to plot for F2 groups
-  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=8, xend=8))+
+  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=7.75, xend=7.75))+
   #F2 names next to plot
-  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=8.5, label=F2, colour=Genotype), size=geom.text.size)+
+  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=8.25, label=F2, colour=Genotype), size=geom.text.size)+
   #vertical F1 group lines next to plot
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=9, xend=9))+
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=8.75, xend=8.75))+
   #F1 names next to plot
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9.5, label=F1), size=geom.text.size)+
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9.25, label=F1), size=geom.text.size)+
   #vertical T2 group lines next to plot
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=10, xend=10))+
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=9.75, xend=9.75))+
   #T2 names next to plot
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10.5, label=T2), size=geom.text.size)+
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10.25, label=T2), size=geom.text.size)+
   #vertical lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
@@ -627,10 +637,10 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   #DSB position dashed horizontal line
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
-  annotate("text", label="F3", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F2", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F1", y=-1, x=9.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=10.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F3", y=-1, x=7, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=8.25, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=9.25, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=10.25, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
   scale_color_manual(name="", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
@@ -733,18 +743,22 @@ no_sites = 6
 plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewidth=line.thick)+
   #the colored rectangles
   geom_tile(aes(y=y_pos_sample, x=x_pos), height=1, width=1, linewidth=0)+
-  #vert line at start
+  #horizontal line at start
   geom_segment(aes(y=0.5, yend=0.5, x=0.5, xend=no_sites+0.5))+
-  #vert line around F1 groups
+  #horizontal line around F1 groups
   geom_segment(aes(y=ypos_F1_stop+0.5, yend=ypos_F1_stop+0.5, x=0.5, xend=no_sites+0.5))+
-  #horizontal lines below for F1 groups
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=7, xend=7))+
-  #F1 names below
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=7.5, label=F1), size=geom.text.size)+
-  #horizontal lines below for T2 groups
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=8, xend=8))+
-  #T2 names below
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=8.5, label=T2), size=geom.text.size)+
+  #vertical lines on the right for F2 names
+  #geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=7, xend=7))+
+  #F2 names on the right
+  geom_text(aes(y=y_pos_sample, x=7, label=DNASample), size=geom.text.size)+
+  #vertical lines on the right for F1 groups
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=7.75, xend=7.75))+
+  #F1 names on the right
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=8.25, label=F1), size=geom.text.size)+
+  #vertical lines on the right for T2 groups
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=8.75, xend=8.75))+
+  #T2 names on the right
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=9.25, label=T2), size=geom.text.size)+
   #horizontal lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
@@ -756,14 +770,15 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   #DSB position dashed horizontal line
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
-  annotate("text", label="F1", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=7, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=8.25, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=9.25, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
   #scale_color_manual(name="F2 bkgd:", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
   scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
-  labs(x="Site", y="F2 individuals", fill="", shape="")+
+  labs(x="Site", y="", fill="", shape="")+
     theme(panel.border = element_blank(), 
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
@@ -778,10 +793,10 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
         legend.justification = "left",
         legend.direction = "vertical",
         legend.text = element_markdown(size=theme.size))+
-  coord_cartesian(xlim=c(-0, no_sites+2.5), expand=FALSE, clip="off")
+  coord_cartesian(xlim=c(-0, no_sites+3.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), width=14, height=10, units = "cm", dpi = "print")
+ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), width=15, height=15, units = "cm", dpi = "print")
 
 
 
@@ -868,21 +883,21 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   #horizontal lines around F2 groups
   geom_segment(aes(y=ypos_F2_stop+0.5, yend=ypos_F2_stop+0.5, x=0.5, xend=no_sites+0.5))+
   #vertical F3 lines
-  geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=7, xend=7))+
+  #geom_segment(aes(y=y_pos_sample-0.25, yend=y_pos_sample+0.25, x=7, xend=7))+
   #F3 names next to plot
-  geom_text(aes(y=y_pos_sample, x=7.5, label=DNASample, colour=Genotype), size=geom.text.size)+
+  geom_text(aes(y=y_pos_sample, x=7, label=DNASample, colour=Genotype), size=geom.text.size)+
   #vertical lines next to plot for F2 groups
-  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=8, xend=8))+
+  geom_segment(aes(y=ypos_F2_start-0.25, yend=ypos_F2_stop+0.25, x=7.75, xend=7.75))+
   #F2 names next to plot
-  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=8.5, label=F2, colour=Genotype), size=geom.text.size)+
+  geom_text(aes(y=(ypos_F2_start+ypos_F2_stop)/2, x=8.25, label=F2, colour=Genotype), size=geom.text.size)+
   #vertical F1 group lines next to plot
-  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=9, xend=9))+
+  geom_segment(aes(y=ypos_F1_start-0.25, yend=ypos_F1_stop+0.25, x=8.75, xend=8.75))+
   #F1 names next to plot
-  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9.5, label=F1), size=geom.text.size)+
+  geom_text(aes(y=(ypos_F1_start+ypos_F1_stop)/2, x=9.25, label=F1), size=geom.text.size)+
   #vertical T2 group lines next to plot
-  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=10, xend=10))+
+  geom_segment(aes(y=ypos_T2_start-0.25, yend=ypos_T2_stop+0.25, x=9.75, xend=9.75))+
   #T2 names next to plot
-  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10.5, label=T2), size=geom.text.size)+
+  geom_text(aes(y=(ypos_T2_start+ypos_T2_stop)/2, x=10.25, label=T2), size=geom.text.size)+
   #vertical lines separating the sites
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=0.5, xend=0.5))+
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=1.5, xend=1.5))+
@@ -894,10 +909,10 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   #DSB position dashed horizontal line
   geom_segment(aes(y=0.5, yend=max(alldata_ypos$y_pos_sample)+0.5, x=4.5, xend=4.5), colour="white", linetype="dashed")+
   #legend for info below plot
-  annotate("text", label="F3", y=-1, x=7.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F2", y=-1, x=8.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="F1", y=-1, x=9.5, size=geom.text.size, hjust=0.5)+
-  annotate("text", label="T2", y=-1, x=10.5, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F3", y=-1, x=7, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F2", y=-1, x=8.25, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="F1", y=-1, x=9.25, size=geom.text.size, hjust=0.5)+
+  annotate("text", label="T2", y=-1, x=10.25, size=geom.text.size, hjust=0.5)+
   #rectangle color legend
   scale_fill_identity(guide="legend", breaks=alldata_ypos_fill_legend$fill_colour, labels=alldata_ypos_fill_legend$value)+
   scale_color_manual(name="", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
