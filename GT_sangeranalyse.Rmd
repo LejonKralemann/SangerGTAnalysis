@@ -75,9 +75,13 @@ shape_df=data.frame(shape=c(19, 1, NA),
 refsequence=DNAString(reftable$Sequence[1])
 refsequence_RC = reverseComplement(refsequence)
 ref_len=nchar(as.character(refsequence))
-
-#acquire search term for mutation analysis
-search_term_mut = as.character(subseq(refsequence, start=as.integer(DSBinfo[[1,1]]-DSBinfo[[1,2]]), width=20))
+DSB_position = as.integer(DSBinfo[[1,1]])
+FLANK_A_REF = substr(refsequence, 1, DSB_position)
+FLANK_A_REF_100 = substr(FLANK_A_REF, nchar(FLANK_A_REF)-100, nchar(FLANK_A_REF))
+FLANK_A_REF_search = substr(FLANK_A_REF_100, 1, 20)
+FLANK_B_REF = substr(refsequence, DSB_position+1, ref_len)
+FLANK_B_REF_100 = substr(FLANK_B_REF, 1, 100)
+FLANK_B_REF_search = substr(FLANK_B_REF_100, nchar(FLANK_B_REF_100)-20, nchar(FLANK_B_REF_100))
 
 #make empty dataframes
 Total_data = tibble(Name = NULL)
@@ -151,11 +155,9 @@ if (inherits(hetseqalleles,'try-error') == TRUE ){
                             Seq2="not found",
                             WTseq=WT_Seq,
                             GTseq=GT_Seq,
-                            before_zone="unknown",
-                            after_zone="unknown",
                             SangerSeqNo=clean_ab1_name_2,
-                            PostDSBseq="",
-                            Shift=99999999)
+                            Prim_Seq = "",
+                            Sec_Seq = "")
     
     Subtotal_data_names = rbind(Subtotal_data_names, currentData)
 
@@ -207,8 +209,8 @@ for (i in row.names(sites)){
   }
   
   #find the SeqToSearch in the primary and secondary calls
-  MatchPrim= matchPattern(SeqToSearch, PrimSeq, max.mismatch = 0)
-  MatchSec= matchPattern(SeqToSearch, SecSeq, max.mismatch = 0)
+  MatchPrim= matchPattern(SeqToSearch, PrimSeq, max.mismatch = 1)
+  MatchSec= matchPattern(SeqToSearch, SecSeq, max.mismatch = 1)
   PositionAfterStartPrim = MatchPrim@ranges@start+(MatchPrim@ranges@width)
   PositionAfterStartSec = MatchSec@ranges@start+(MatchSec@ranges@width)
   
@@ -257,59 +259,16 @@ for (i in row.names(sites)){
     Allele2Seq = "ambiguous"
   }
   }
-
-  #find the SeqToSearch again, this time allowing mismatches
-  MatchSec_before= matchPattern(SeqToSearch_before, SecSeq, max.mismatch = 10)
-  MatchSec_after= matchPattern(SeqToSearch_after, SecSeq, max.mismatch = 10)
-  if (length(MatchSec_before)>0){
-  before_zone = "wt"  
-  }else{
-  before_zone = "mutated"   
-  }
-   if (length(MatchSec_after)>0){
-  after_zone = "wt"   
-  }else{
-  after_zone = "mutated"    
-  }
   
   #write it to an object
   currentData = tibble(Name=Site_name, Seq1=Allele1Seq, Seq2=Allele2Seq) %>% 
     mutate(WTseq = WT_Seq, 
-           GTseq = GT_Seq,
-           before_zone = before_zone,
-           after_zone = after_zone)
+           GTseq = GT_Seq)
   
   Subtotal_data = rbind(Subtotal_data, currentData)
 
   
 }
-
-#Find mutations independent of the GT sites
-  #only use the forward sequences
-  if (current_orientation == "FW"){
-    #find the search term in the SecSeq, allowing 2 mismatches, and acquire its position
-    MatchSec_mut = matchPattern(search_term_mut, SecSeq, max.mismatch = 2)
-    if (length(MatchSec_mut) == 1){
-      Position_match_seq_mut = MatchSec_mut@ranges@start
-      #Add distance to DSB plus 10bp, then acquire the 20bp from the SecSeq from there
-      Post_DSB_seq = as.character(subseq(SecSeq, start=Position_match_seq_mut+DSBinfo[[1,2]]+21, width=20))
-      #then search that sequence in the ref sequence, allowing 2 mismatches, and acquire the position
-      MatchSec_postmut = matchPattern(Post_DSB_seq, refsequence, max.mismatch = 2)
-      if (length(MatchSec_postmut) == 1){
-        Position_postmut = MatchSec_postmut@ranges@start
-        #then calculate the discrepancy. positive is an overall insertion. negative is an overall deletion.
-        shift = as.integer(Position_postmut - (DSBinfo[[1,1]]+21))
-      }else{
-        shift = as.integer(99999999)
-      }
-    }else{
-      shift = as.integer(99999999)
-      Post_DSB_seq = ""
-    }
-  }else{
-    shift = as.integer(99999999)  
-    Post_DSB_seq = ""
-  }
 
 if (current_orientation == "FW"){
   PrimSeqFw = as.character(PrimSeq)
@@ -319,17 +278,13 @@ if (current_orientation == "FW"){
   SecSeqFW = as.character(reverseComplement(SecSeq))
 }
 
-
+#combine the data
 Subtotal_data_names = Subtotal_data %>% 
     mutate(SangerSeqNo = clean_ab1_name_2,
-           PostDSBseq = Post_DSB_seq,
-           Shift = shift,
            Prim_Seq = PrimSeqFw,
            Sec_Seq = SecSeqFW)
 
 }
-
-
 
 Total_data = rbind(Total_data, Subtotal_data_names)
 }
@@ -343,14 +298,14 @@ forbiddenletters="([RYMKSWHBVDN])"
 
 #basic interpretation
 Total_data_interp = Total_data %>% mutate(Genotype = case_when(
-  str_detect(Seq1, forbiddenletters)==TRUE | str_detect(Seq2, forbiddenletters)==TRUE ~ "undetermined",
+  str_detect(Seq1, forbiddenletters)==TRUE | str_detect(Seq2, forbiddenletters)==TRUE | Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
   Seq1 == WTseq & Seq2 == WTseq ~ "wt/wt",
   Seq1 == WTseq & Seq2 == GTseq ~ "GT/wt",
-  Seq1 != WTseq & Seq1 != GTseq & Seq1 != "not found" & Seq2 == GTseq ~ "GT/mut", 
+  (Seq1 != WTseq & Seq1 != GTseq & Seq1 != "not found" & Seq2 == GTseq) | (Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" & Seq1 == GTseq) ~ "GT/mut", 
   Seq1 == GTseq & Seq2 == GTseq ~ "GT/GT",
-  Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
   Seq1 == WTseq & Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" ~ "wt/mut",
-  TRUE ~ "mut/mut")) %>%
+  Seq1 != GTseq & Seq1 != WTseq & Seq1 != "not found" & Seq2 != GTseq & Seq2 != WTseq & Seq2 != "not found" ~ "mut/mut",
+  TRUE ~ "catch")) %>%
   mutate(Strict = strict)%>%
   #add primer info
   left_join(dna_samples, by="SangerSeqNo")
@@ -376,7 +331,7 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
 
 
   #Change the format of the data
-  Data_clean = Total_data_interp_problemfilter %>% select(Name, SangerSeqNo, Genotype, Shift, Prim_Seq, Sec_Seq)
+  Data_clean = Total_data_interp_problemfilter %>% select(Name, SangerSeqNo, Genotype, Prim_Seq, Sec_Seq)
   Total_trans = spread(Data_clean, Name, Genotype)
   
   #add sample and parent info
@@ -479,32 +434,12 @@ for (i in row.names(Total_seq_rxns)) {
     Total_consensus = left_join(Total_consensus, Consensus, by = c("DNASample", "Locus"))
     
   }
-  #summarize shift info
-  #summarize so that there is not a sequence per row, but a distinct outcome per row
-    Subset_working_shift = Total_trans_primer %>%
-      select(DNASample, Locus, SangerSeqNo, Shift) %>%
-      filter(DNASample == Sample_name) %>%
-      filter(Locus == Locus_name) %>%
-      group_by(across(c(-SangerSeqNo))) %>%
-      summarize(no_observations = n()) %>%
-      arrange(desc(no_observations))
-  
-    #remove unknown shift and calculate average shift
-      Subset_working_shift_2 = Subset_working_shift %>% filter(Shift != 99999999) %>%
-        group_by(DNASample, Locus)%>%
-        summarize(Shift_avg = mean(Shift))
-    
-      if (nrow(Subset_working_shift_2)>0){
-    Total_consensus2 = Total_consensus %>% left_join(Subset_working_shift_2, by=c("DNASample", "Locus"))
-      }else{
-        Total_consensus2 = Total_consensus %>% mutate(Shift_avg = 99999999)
-      }
   
   #combine data from different samples
   if (exists("Total_ultimate") == TRUE) {
-    Total_ultimate = rbind(Total_ultimate, Total_consensus2)
+    Total_ultimate = rbind(Total_ultimate, Total_consensus)
   } else{
-    Total_ultimate = Total_consensus2
+    Total_ultimate = Total_consensus
   }
 }
 
@@ -1030,10 +965,15 @@ data_figure=alldata %>%
   group_by(Genotype)%>%
   arrange(totallen, .by_group=TRUE)
 
+tebwt = "*TEB*<sup>+/+</sup>"
+tebmut= "*TEB*<sup>-/-</sup>"
+
 data_figure_teb = data_figure %>%
-  filter(Genotype== "teb")
+  filter(Genotype== "teb")%>%
+  mutate(Genotype_nicer = tebmut)
 data_figure_wt = data_figure %>%
-  filter(Genotype== "wt")
+  filter(Genotype== "wt")%>%
+  mutate(Genotype_nicer = tebwt)
 
 data_figure_teb = rownames_to_column(data_figure_teb, "rown")%>%
   rowwise()%>%
@@ -1042,8 +982,11 @@ data_figure_wt = rownames_to_column(data_figure_wt, "rown")%>%
   rowwise()%>%
   mutate(rown = as.integer(rown)+3)
 
+
+
 data_figure_combined = rbind(data_figure_teb, data_figure_wt)
 
+data_figure_combined$Genotype_nicer = factor(data_figure_combined$Genotype_nicer, levels=c(tebwt, tebmut))
 
 
 plt = ggplot(data=data_figure_combined, aes(y=rown))+
@@ -1059,6 +1002,7 @@ plt = ggplot(data=data_figure_combined, aes(y=rown))+
         axis.text.y = element_blank(),
         axis.text.x = element_text(family="Verdana", colour="black", size=theme.size),
         axis.title.x = element_text(colour="black", size=theme.size),
+        strip.text = element_markdown(size=theme.size),
         strip.background = element_blank(),
         legend.position = "right",
         legend.justification = "left",
@@ -1069,7 +1013,7 @@ plt = ggplot(data=data_figure_combined, aes(y=rown))+
   geom_errorbar(aes(xmin=SE_up, xmax = mean_uplen))+
   geom_errorbar(aes(xmin=mean_downlen, xmax = SE_down))+
   scale_x_continuous(breaks=seq(from=-700, to=100, by=100))+
-  facet_grid(cols=vars(Genotype))
+  facet_grid(cols=vars(Genotype_nicer))
 
 
 plt
