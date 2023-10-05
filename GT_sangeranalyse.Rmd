@@ -33,7 +33,7 @@ dna_orient = left_join(dna_samples, primerinfo, by="PrimerName") %>% select(Sang
 strict=TRUE
 
 #ratio of GT to wt peak intensity
-GT_peak_ratio = 0.33
+GT_peak_ratio = 0.25
 
 #same, but for good/bad zone calling
 GT_peak_ratio_zones = 0.1
@@ -371,29 +371,30 @@ for (i in row.names(Total_seq_rxns)) {
       arrange(desc(no_observations))
     
     #remove rows where site is undetermined or possibly mutated (the latter could reflect poor sequence quality too) 
-    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "wt/mut" & get({{Site_name}}) != "mut/mut")
+    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "wt/mut" & get({{Site_name}}) != "mut/mut" & get({{Site_name}}) != "GT/mut")
     
     #if all are undetermined or mutated make this the final outcome
     outcomes=pull(Subset_working_2, Site_name)
     outcomes_unmut=pull(Subset_working, Site_name)
     if (nrow(Subset_working_2) == 0) {
-      if ("mut/mut" %in% outcomes_unmut){
-        if ("wt/mut" %in% outcomes_unmut){
-          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/mut") #assume mut/mut was seq error or 1 allele had been missed
+      if ("wt/mut" %in% outcomes_unmut){
+        if ("GT/mut" %in% outcomes_unmut){#conflict
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined") 
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }else{
+        }else {#assume mut/mut was seq error or 1 allele had been missed
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/mut") 
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        } 
+      }else if ("GT/mut" %in% outcomes_unmut){
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/mut")
+          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
+        }else if ("mut/mut" %in% outcomes_unmut){
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "mut/mut")
-          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }
-      }else{
-        if ("wt/mut" %in% outcomes_unmut){
-          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/mut")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }else{
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
-      }
     #if not undetermined or mutated, the specific combination of different outcomes determines the final outcome
       }else if (nrow(Subset_working_2) > 0){
         if ("wt/wt" %in% outcomes){
@@ -403,9 +404,6 @@ for (i in row.names(Total_seq_rxns)) {
           }else if ("GT/wt" %in% outcomes){
             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt")  #assume 1 allele was missed in wt/wt case
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-          }else if  ("GT/mut" %in% outcomes){
-            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
-            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
              Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
@@ -414,18 +412,12 @@ for (i in row.names(Total_seq_rxns)) {
           if ("GT/wt" %in% outcomes){
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt") #assume one allele was missed in the GT/GT case
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-          }else if ("GT/mut" %in% outcomes){
-          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/mut")  #assume one allele was missed in the GT/GT case
-          names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/GT")  
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else if ("GT/wt" %in% outcomes){#if GT/wt (or GT/mut) but not wt/wt and not GT/GT
-            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt") #assume mut was seq error
-            names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }else{
-          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/mut")
+        }else{#if GT/wt but not wt/wt and not GT/GT
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
       }
@@ -872,7 +864,7 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   coord_cartesian(xlim=c(-0, no_sites+4.5), expand=FALSE, clip="off")
 
 plt
-ggsave(file=paste0(output_dir, "ectopicGT_stackedbar.png"), plot=plt, width=14, height=5, units = "cm", dpi = "print")
+ggsave(file=paste0(output_dir, "ectopicGT_stackedbar.png"), plot=plt, width=14, height=6, units = "cm", dpi = "print")
 
 
 
@@ -887,8 +879,6 @@ ggsave(file=paste0(output_dir, "ectopicGT_stackedbar.png"), plot=plt, width=14, 
 
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
   #first get rid of samples where some information is unclear
-  filter(Site_1 != "mut/mut" & Site_2 != "mut/mut" & Site_3 != "mut/mut" & Site_4 != "mut/mut" & Site_5 != "mut/mut" & Site_6 != "mut/mut" )%>%
-  filter(Site_1 != "wt/mut" & Site_2 != "wt/mut" & Site_3 != "wt/mut" & Site_4 != "wt/mut" & Site_5 != "wt/mut" & Site_6 != "wt/mut" )%>%
   filter(Site_1 != "undetermined" & Site_2 != "undetermined" & Site_3 != "undetermined" & Site_4 != "undetermined" & Site_5 != "undetermined" & Site_6 != "undetermined" )%>%
   #then get rid of the ones without ATG at codon 426
   filter(Site_4!="wt/wt")%>%
@@ -990,13 +980,13 @@ data_figure_combined$Genotype_nicer = factor(data_figure_combined$Genotype_nicer
 
 
 plt = ggplot(data=data_figure_combined, aes(y=rown))+
-  geom_col(aes(x=mean_downlen), fill="grey90", col="black", orientation = "y")+
-  geom_col(aes(x=mean_uplen), fill="grey90", col="black", orientation = "y")+
+  geom_col(aes(x=mean_downlen), fill="grey90", col="black", orientation = "y", linewidth=line.thick)+
+  geom_col(aes(x=mean_uplen), fill="grey90", col="black", orientation = "y", linewidth=line.thick)+
   labs(x="Mean gene conversion tract length (bp from DSB)", y="F3s grouped by F2 parent")+
     theme(
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
-        panel.background = element_rect(fill="white", colour="black"), 
+        panel.background = element_rect(fill="white", colour="black", linewidth=line.thick*2), 
         text = element_text(family="Verdana", colour="black", size=theme.size),
         axis.ticks.y = element_blank(),
         axis.text.y = element_blank(),
@@ -1008,10 +998,10 @@ plt = ggplot(data=data_figure_combined, aes(y=rown))+
         legend.justification = "left",
         legend.direction = "vertical",
         legend.text = element_markdown(size=theme.size))+
-  geom_vline(xintercept=-693, lty="dotted", col="red")+
-  geom_vline(xintercept=118, lty="dotted", col="red")+
-  geom_errorbar(aes(xmin=SE_up, xmax = mean_uplen))+
-  geom_errorbar(aes(xmin=mean_downlen, xmax = SE_down))+
+  geom_vline(xintercept=-693, lty="dotted", col="red", linewidth=line.thick)+
+  geom_vline(xintercept=118, lty="dotted", col="red", linewidth=line.thick)+
+  geom_errorbar(aes(xmin=SE_up, xmax = mean_uplen), linewidth=line.thick)+
+  geom_errorbar(aes(xmin=mean_downlen, xmax = SE_down), linewidth=line.thick)+
   scale_x_continuous(breaks=seq(from=-700, to=100, by=100))+
   facet_grid(cols=vars(Genotype_nicer))
 
