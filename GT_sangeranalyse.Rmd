@@ -292,13 +292,9 @@ Total_data = rbind(Total_data, Subtotal_data_names)
 #interpreting the outcomes & changing format
 ###############################################################################################
 
-#list of non-allowed characters
-forbiddenletters="([RYMKSWHBVDN])"
-
-
 #basic interpretation
 Total_data_interp = Total_data %>% mutate(Genotype = case_when(
-  str_detect(Seq1, forbiddenletters)==TRUE | str_detect(Seq2, forbiddenletters)==TRUE | Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
+  Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
   Seq1 == WTseq & Seq2 == WTseq ~ "wt/wt",
   Seq1 == WTseq & Seq2 == GTseq ~ "GT/wt",
   (Seq1 != WTseq & Seq1 != GTseq & Seq1 != "not found" & Seq2 == GTseq) | (Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" & Seq1 == GTseq) ~ "GT/mut", 
@@ -309,6 +305,27 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
   mutate(Strict = strict)%>%
   #add primer info
   left_join(dna_samples, by="SangerSeqNo")
+
+#If degenerate bases are present, match with GT seq to find if it is mut/mut or GT/mut
+forbiddenletters="([RYMKSWHBVDN])"
+for (i in row.names(Total_data_interp)){
+  Seq2=as.character(Total_data_interp[i, "Seq2"])
+  if (Seq2=="not found"){
+    next
+  }else{
+  
+  Seq2_DNAString=DNAString(Seq2)
+  GTseq=DNAString(as.character(Total_data_interp[i, "GTseq"]))
+  if (str_detect(Seq2, forbiddenletters)==TRUE){
+    degmatch = matchPattern(GTseq, Seq2_DNAString, fixed=FALSE)
+    if (length(degmatch) == 1){
+      if (Total_data_interp[i, "Genotype"] != "undetermined"){
+      Total_data_interp[i, "Genotype"]<-"GT/mut"
+      }
+    }
+  }
+  }
+}
   
   #filter away problematic primer site combinations
   no_problems = nrow(filterproblem)
