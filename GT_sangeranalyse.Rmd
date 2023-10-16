@@ -310,7 +310,8 @@ Total_data_interp = Total_data %>% mutate(Genotype = case_when(
 forbiddenletters="([RYMKSWHBVDN])"
 for (i in row.names(Total_data_interp)){
   Seq2=as.character(Total_data_interp[i, "Seq2"])
-  if (Seq2=="not found"){
+  Geno=as.character(Total_data_interp[i, "Genotype"])
+  if (Seq2=="not found" | Geno == "GT/GT" | Geno == "wt/wt" | Geno == "GT/wt"){
     next
   }else{
   
