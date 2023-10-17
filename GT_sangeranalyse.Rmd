@@ -2,14 +2,13 @@
 #load libraries and data
 ```{r}
 #load packages
-library(tidyverse)
-library(openxlsx)
-library(ggtext)
-library(Biostrings)
-library(sangerseqR)
-library(reshape2)
-library(svglite)
-library(exactRankTests)
+if (require(tidyverse)==FALSE){install.packages("tidyverse", repos = "http://cran.us.r-project.org")}
+if (require(openxlsx)==FALSE){install.packages("openxlsx", repos = "http://cran.us.r-project.org")}
+if (require(ggtext)==FALSE){install.packages("ggtext", repos = "http://cran.us.r-project.org")}
+if (require(Biostrings)==FALSE){install.packages("Biostrings", repos = "http://cran.us.r-project.org")}
+if (require(sangerseqR)==FALSE){install.packages("sangerseqR", repos = "http://cran.us.r-project.org")}
+if (require(svglite)==FALSE){install.packages("svglite", repos = "http://cran.us.r-project.org")}
+if (require(exactRankTests)==FALSE){install.packages("exactRankTests", repos = "http://cran.us.r-project.org")}
 
 #set paths
 input_dir= "./input/"
