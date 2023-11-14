@@ -1,7 +1,7 @@
 
 #load libraries and data
 ```{r}
-#load packages
+#install and load packages
 if (require(tidyverse)==FALSE){install.packages("tidyverse", repos = "http://cran.us.r-project.org")}
 if (require(openxlsx)==FALSE){install.packages("openxlsx", repos = "http://cran.us.r-project.org")}
 if (require(ggtext)==FALSE){install.packages("ggtext", repos = "http://cran.us.r-project.org")}
@@ -9,6 +9,7 @@ if (require(Biostrings)==FALSE){install.packages("Biostrings", repos = "http://c
 if (require(sangerseqR)==FALSE){install.packages("sangerseqR", repos = "http://cran.us.r-project.org")}
 if (require(svglite)==FALSE){install.packages("svglite", repos = "http://cran.us.r-project.org")}
 if (require(exactRankTests)==FALSE){install.packages("exactRankTests", repos = "http://cran.us.r-project.org")}
+if (require(ggbeeswarm)==FALSE){install.packages("exactRankTests", repos = "http://cran.us.r-project.org")}
 
 #set paths
 input_dir= "./input/"
@@ -26,42 +27,64 @@ dna_orient = left_join(dna_samples, primerinfo, by="PrimerName") %>% select(Sang
 ```
 
 ```{r}
-#set options
+#set global vars
 
-#set to TRUE for more stricter calling of genotypes
+#Set to TRUE for more stricter calling of genotypes. The searching for the GT site happens on the sequence of the reference peaks (FALSE), or on the ref and secondary peak sequences (TRUE). This means that if the sequence is noisy and contains sequencing errors, the secondary peaks at the GT site cannot be established. This ensures a high quality of secondary peak calling.
 strict=TRUE
 
-#ratio of GT to wt peak intensity
+#minimum ratio of GT to wt peak amplitude. Below this value secondary peaks are assumed to be noise and so not included in the allele sequence. They are, however, still included in peak amplitude calculations.
 GT_peak_ratio = 0.25
-
-#same, but for good/bad zone calling
-GT_peak_ratio_zones = 0.1
 
 #length of sequence to match to find the GT sites
 GT_fdr_len = 20
 
-#length of sequence to find whether site adjacent areas are mutated
-search_width = 40
+#a list of degenerate base letters
+forbiddenletters="([RYMKSWHBVDN])"
+
+#var for indicating progress
+PercentageDone = 0
 
 #drawing options
-theme.size=7 # in points
-line.thick=0.469 # in points (although 0.469 pt here is equal to 1 pt in inkscape)
-geom.text.size = theme.size / (1/0.3514598025)
+theme.size=7 #theme font size in points
+geom.text.size = theme.size / (1/0.352777778) #font size works different in geom.text
 windowsFonts(Verdana = windowsFont("Verdana"))
+line.thick=0.469 # in points (although 0.469 pt here is equal to 1 pt in inkscape)
+
 jsiglevel1=1
 jsiglevel2=0.05
 jsiglevel3=0.01
 jsiglevel4=0.001
 
-fill_colour_df=data.frame(value=factor(c("wt/wt", "wt/mut", "GT/wt", "GT/mut", "GT/GT", "mut/mut", "undetermined")), 
+fill_colour_df=data.frame(value=factor(c("wt", "wt/mut", "GT/wt", "GT/mut", "GT", "mut", "undetermined")), 
                         fill_colour=factor(c("cornflowerblue", "darkslategray3", "plum", "lightsalmon2", "indianred3", "lightgoldenrod2", "grey")),
                         fill_colour_order=factor(c(1, 2, 3, 4, 5, 6, 7)))
-#make this
-shape_df=data.frame(shape=c(19, 1, NA),
-                    label=c("TRUE", "FALSE", "undetermined"))
 
+#the following line can probably be removed
+shape_df=data.frame(shape=c(19, 1, NA), label=c("TRUE", "FALSE", "undetermined"))
 
-
+#function to get the sum of amplitudes of the differing bases at the GT sites 
+getAmpSum <- function(AlleleSeq, OtherSeq, in_PositionAfterStartPrim, in_Site_width) {
+  #get the column positions in the amplitude matrix
+  AllelePosC = as.numeric(unlist(str_split(str_replace_all(AlleleSeq, c("A"="1", "C"="2", "G"="3", "T"="4")), "")))
+  #also for the other seq (if the other is GT this is wt)
+  OtherPosC = as.numeric(unlist(str_split(str_replace_all(OtherSeq, c("A"="1", "C"="2", "G"="3", "T"="4")), "")))
+  #get the base positions (rows in amplitude matrix)
+  AllelePosR = seq(from=in_PositionAfterStartPrim, to=in_PositionAfterStartPrim+(in_Site_width-1), by=1)
+  #combine
+  PosMatrix = cbind(AllelePosR, AllelePosC)
+  #get the amplitude values at these positions
+  AlleleAmp = hetseqalleles@peakAmpMatrix[PosMatrix]
+  #combine with other info
+  PosMatrixFull = cbind(PosMatrix, OtherPosC, AlleleAmp)
+  #add up the values of bases where the AlleleSeq and OtherSeq differ, and return it
+  SumAlleleAmp = 0
+  for (i in 1:nrow(PosMatrixFull)){
+    if (PosMatrixFull[i, 2][[1]] != PosMatrixFull[i, 3][[1]]){
+      SumAlleleAmp = SumAlleleAmp +  PosMatrixFull[i, 4][[1]]
+    }
+  }
+  return(SumAlleleAmp)
+}
 ```
 
 ```{r}
@@ -99,6 +122,8 @@ clean_ab1_name_2 = str_replace(clean_ab1_name, ".ab1", "")
    stop(paste0("Filename ", clean_ab1_name_2, " not found in SangerAnalysisInput - sangerseqno_dnasample"))
  }
 }
+
+message(paste0("Starting sanger data analysis, ", round(PercentageDone, digits=3) , "% complete"))
 
 for (j in files){
 
@@ -156,7 +181,10 @@ if (inherits(hetseqalleles,'try-error') == TRUE ){
                             GTseq=GT_Seq,
                             SangerSeqNo=clean_ab1_name_2,
                             Prim_Seq = "",
-                            Sec_Seq = "")
+                            Sec_Seq = "",
+                            WT_Amp=NA,
+                            GT_Amp=NA,
+                            AmpRatio=NA)
     
     Subtotal_data_names = rbind(Subtotal_data_names, currentData)
 
@@ -190,19 +218,13 @@ for (i in row.names(sites)){
   #get the sequence preceding and following the site of interest to match
   if (current_orientation == "FW"){
   SeqToSearch=subseq(refsequence, start=Site_start-GT_fdr_len, width=GT_fdr_len)
-  SeqToSearch_before=subseq(refsequence, start=Site_start-search_width, width=search_width)
-  SeqToSearch_after=subseq(refsequence, start=Site_start+Site_width, width=search_width)
   }else{
   #search on the other side of the site of interest when using reverse sequencing primer
   if (Insertion > 0){
   SeqToSearch=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-(1+Insertion))+GT_fdr_len)), width=GT_fdr_len)
-  SeqToSearch_before=subseq(refsequence_RC, start=(ref_len-(Site_start-2)), width=search_width)
-  SeqToSearch_after=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-(1+Insertion))+search_width)), width=search_width)
   
   }else{
   SeqToSearch=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-1)+GT_fdr_len)), width=GT_fdr_len)
-  SeqToSearch_before=subseq(refsequence_RC, start=(ref_len-(Site_start-2)), width=search_width)
-  SeqToSearch_after=subseq(refsequence_RC, start=(ref_len-((Site_start-1)+(Site_width-1)+search_width)), width=search_width)
   
   }
   }
@@ -211,56 +233,51 @@ for (i in row.names(sites)){
   MatchPrim= matchPattern(SeqToSearch, PrimSeq, max.mismatch = 1)
   MatchSec= matchPattern(SeqToSearch, SecSeq, max.mismatch = 1)
   PositionAfterStartPrim = MatchPrim@ranges@start+(MatchPrim@ranges@width)
+  if (strict==TRUE){  #strict mode that looks for the sites in the primary and secondary sequences
   PositionAfterStartSec = MatchSec@ranges@start+(MatchSec@ranges@width)
+  }else{ #a lenient mode that only looks for the sites in the primary sequence
+  PositionAfterStartSec = PositionAfterStartPrim
+  }
   
-  
-  
-  #get the sequences of the site of interest
-  #strict mode that looks for the sites in the primary and secondary sequences
-  if (strict==TRUE){
-  if(length(PositionAfterStartPrim) == 1){
+  #get the sequences and peak amplitudes of the site of interest
+  if(length(PositionAfterStartPrim) == 1 & length(PositionAfterStartSec) == 1){
     if (current_orientation == "FW"){
-    Allele1Seq = as.character(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width ))
+      Allele1Seq = as.character(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width ))
+      Allele2Seq = as.character(subseq(SecSeq, start = PositionAfterStartSec, width = Site_width))
+      if (PositionAfterStartPrim == PositionAfterStartSec){
+        WTAmp = getAmpSum(WT_Seq, GT_Seq, PositionAfterStartPrim, Site_width)
+        GTAmp = getAmpSum(GT_Seq, WT_Seq, PositionAfterStartSec, Site_width)
+      }else{#in case the secondary sequence has shifted, don't get the amplitudes
+        WTAmp = NA
+        GTAmp = NA 
+      }
     }else{
-    Allele1Seq = as.character(reverseComplement(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width )))
+      Allele1Seq_beforeRC = subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width)
+      Allele1Seq = as.character(reverseComplement(Allele1Seq_beforeRC))
+      Allele2Seq_beforeRC = subseq(SecSeq, start = PositionAfterStartSec, width = Site_width)
+      Allele2Seq = as.character(reverseComplement(Allele2Seq_beforeRC))
+      if (PositionAfterStartPrim == PositionAfterStartSec){
+        WTAmp = getAmpSum(as.character(reverseComplement(DNAString(WT_Seq))), as.character(reverseComplement(DNAString(GT_Seq))), PositionAfterStartPrim, Site_width)
+        GTAmp = getAmpSum(as.character(reverseComplement(DNAString(GT_Seq))), as.character(reverseComplement(DNAString(WT_Seq))), PositionAfterStartSec, Site_width)
+      }else{#in case the secondary sequence has shifted, don't get the amplitudes
+        WTAmp = NA
+        GTAmp = NA
+      }
     }
-  }else if(length(PositionAfterStartPrim) == 0){
+  }else{ #if you can't find both (or there is ambiguity), there is no point getting the sequence and amplitude of one of them
     Allele1Seq = "not found"
-  }else{
-    Allele1Seq = "ambiguous"
-  }
-  
-    if(length(PositionAfterStartSec) == 1){
-    if (current_orientation == "FW"){
-      Allele2Seq = as.character(subseq(SecSeq, start=PositionAfterStartSec, width=Site_width ))
-    }else{
-      Allele2Seq = as.character(reverseComplement(subseq(SecSeq, start=PositionAfterStartSec, width=Site_width )))}
-  }else if(length(PositionAfterStartSec) == 0){
+    WTAmp = NA
     Allele2Seq = "not found"
-  }else{
-    Allele2Seq = "ambiguous"
-  }}
-  #a lenient mode that only looks for the sites in the primary sequence
-  if (strict==FALSE){
-    if(length(PositionAfterStartPrim) == 1){
-    if (current_orientation == "FW"){
-    Allele1Seq = as.character(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width ))
-    Allele2Seq = as.character(subseq(SecSeq, start=PositionAfterStartPrim, width=Site_width ))
-    }else{
-    Allele1Seq = as.character(reverseComplement(subseq(PrimSeq, start=PositionAfterStartPrim, width=Site_width )))
-    Allele2Seq = as.character(reverseComplement(subseq(SecSeq, start=PositionAfterStartPrim, width=Site_width )))
-    }
-  }else if(length(PositionAfterStartPrim) == 0){
-    Allele1Seq = "not found"
-    Allele2Seq = "not found"
-  }else{
-    Allele1Seq = "ambiguous"
-    Allele2Seq = "ambiguous"
-  }
-  }
+    GTAmp = NA
+  } 
   
   #write it to an object
-  currentData = tibble(Name=Site_name, Seq1=Allele1Seq, Seq2=Allele2Seq) %>% 
+  currentData = tibble(Name=Site_name, 
+                       Seq1=Allele1Seq, 
+                       Seq2=Allele2Seq,
+                       WT_Amp=WTAmp,
+                       GT_Amp=GTAmp,
+                       AmpRatio=GTAmp/(WTAmp+GTAmp)) %>% 
     mutate(WTseq = WT_Seq, 
            GTseq = GT_Seq)
   
@@ -286,47 +303,72 @@ Subtotal_data_names = Subtotal_data %>%
 }
 
 Total_data = rbind(Total_data, Subtotal_data_names)
+
+#show progress
+PercentageDone = PercentageDone + ((1/length(files))*100)
+message(paste0("Sanger data analysis ", round(PercentageDone, digits=3), "% complete"))
 }
 #############################################################################################
 #interpreting the outcomes & changing format
 ###############################################################################################
 
 #basic interpretation
-Total_data_interp = Total_data %>% mutate(Genotype = case_when(
-  Seq1 == "not found" |  Seq2 == "not found" ~ "undetermined",
-  Seq1 == WTseq & Seq2 == WTseq ~ "wt/wt",
-  Seq1 == WTseq & Seq2 == GTseq ~ "GT/wt",
-  (Seq1 != WTseq & Seq1 != GTseq & Seq1 != "not found" & Seq2 == GTseq) | (Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" & Seq1 == GTseq) ~ "GT/mut", 
-  Seq1 == GTseq & Seq2 == GTseq ~ "GT/GT",
-  Seq1 == WTseq & Seq2 != WTseq & Seq2 != GTseq & Seq2 != "not found" ~ "wt/mut",
-  Seq1 != GTseq & Seq1 != WTseq & Seq1 != "not found" & Seq2 != GTseq & Seq2 != WTseq & Seq2 != "not found" ~ "mut/mut",
-  TRUE ~ "catch")) %>%
+Total_data_interp_pre = Total_data %>% 
+  mutate(Seq1_genotype = case_when(Seq1 == "not found"  ~ "undetermined",
+                                   Seq1 == WTseq ~ "wt",
+                                   Seq1 == GTseq ~ "GT",
+                                   TRUE ~ "mut"))%>%
+  mutate(Seq2_genotype = case_when(Seq2 == "not found"  ~ "undetermined",
+                                   Seq2 == WTseq ~ "wt",
+                                   Seq2 == GTseq ~ "GT",
+                                   TRUE ~ "mut"))
+
+#fix interpretation for degenerate bases
+for (i in row.names(Total_data_interp_pre)){
+  if (Total_data_interp_pre[i, "Seq1_genotype"] == "mut" | Total_data_interp_pre[i, "Seq2_genotype"] == "mut"){
+    Seq1=as.character(Total_data_interp_pre[i, "Seq1"])
+    Seq2=as.character(Total_data_interp_pre[i, "Seq2"])
+    if (str_detect(Seq2, forbiddenletters)==TRUE | str_detect(Seq1, forbiddenletters)==TRUE){
+      consensus= DNAString(consensusString(DNAStringSet(c(as.character(Total_data_interp_pre[i, "Seq1"]), as.character(Total_data_interp_pre[i, "Seq2"])))))
+      WTseq=DNAString(as.character(Total_data_interp_pre[i, "WTseq"]))
+      GTseq=DNAString(as.character(Total_data_interp_pre[i, "GTseq"]))
+      degmatch_GT = matchPattern(GTseq, consensus, fixed=FALSE)
+      degmatch_WT = matchPattern(WTseq, consensus, fixed=FALSE)
+      if (length(degmatch_WT) > 0){ 
+        if (length(degmatch_GT) > 0){
+          Total_data_interp_pre[i, "Seq1_genotype"]<-"wt"
+          Total_data_interp_pre[i, "Seq2_genotype"]<-"GT"
+        }else{
+          Total_data_interp_pre[i, "Seq1_genotype"]<-"wt"
+          Total_data_interp_pre[i, "Seq2_genotype"]<-"mut"
+        }
+      }else{
+        if (length(degmatch_GT) > 0){
+          Total_data_interp_pre[i, "Seq1_genotype"]<-"mut"
+          Total_data_interp_pre[i, "Seq2_genotype"]<-"GT"
+        }else{
+          Total_data_interp_pre[i, "Seq1_genotype"]<-"mut"
+          Total_data_interp_pre[i, "Seq2_genotype"]<-"mut"
+        }
+      }
+    }
+  }
+}
+
+
+Total_data_interp = Total_data_interp_pre %>%
+  mutate(Genotype = case_when(Seq1_genotype == "wt" & Seq2_genotype == "wt" ~ "wt",
+                              Seq1_genotype == "GT" &  Seq2_genotype == "GT" ~ "GT",
+                              (Seq1_genotype == "wt" & Seq2_genotype == "GT")| (Seq1_genotype == "GT" & Seq2_genotype == "wt") ~ "GT/wt",
+                              (Seq1_genotype == "wt" & Seq2_genotype == "mut") | (Seq2_genotype == "wt" & Seq1_genotype == "mut") ~ "wt/mut",
+                              (Seq1_genotype == "GT" & Seq2_genotype == "mut") | (Seq2_genotype == "GT" & Seq1_genotype == "mut") ~ "GT/mut",
+                              Seq1_genotype == "mut" & Seq2_genotype == "mut" ~ "mut",
+                              Seq1_genotype == "undetermined" | Seq2_genotype == "undetermined" ~ "undetermined",
+                              TRUE ~ "catch")) %>%
   mutate(Strict = strict)%>%
   #add primer info
   left_join(dna_samples, by="SangerSeqNo")
 
-#If degenerate bases are present, match with GT seq to find if it is mut/mut or GT/mut
-forbiddenletters="([RYMKSWHBVDN])"
-for (i in row.names(Total_data_interp)){
-  Seq2=as.character(Total_data_interp[i, "Seq2"])
-  Geno=as.character(Total_data_interp[i, "Genotype"])
-  if (Seq2=="not found" | Geno == "GT/GT" | Geno == "wt/wt" | Geno == "GT/wt"){
-    next
-  }else{
-  
-  Seq2_DNAString=DNAString(Seq2)
-  GTseq=DNAString(as.character(Total_data_interp[i, "GTseq"]))
-  if (str_detect(Seq2, forbiddenletters)==TRUE){
-    degmatch = matchPattern(GTseq, Seq2_DNAString, fixed=FALSE)
-    if (length(degmatch) == 1){
-      if (Total_data_interp[i, "Genotype"] != "undetermined"){
-      Total_data_interp[i, "Genotype"]<-"GT/mut"
-      }
-    }
-  }
-  }
-}
-  
   #filter away problematic primer site combinations
   no_problems = nrow(filterproblem)
   for (i in nrow(filterproblem)){
@@ -365,7 +407,7 @@ for (i in row.names(Total_data_interp)){
 if (exists("Total_ultimate")){
 rm(Total_ultimate)}
 
-  Total_seq_rxns = Total_trans_primer %>% group_by(DNASample, Locus) %>% summarize(count_reactions = n()) %>%ungroup()
+  Total_seq_rxns = Total_trans_primer %>% group_by(DNASample, Locus) %>% summarize(count_reactions = n(), .group="drop_last") %>%ungroup()
 
 for (i in row.names(Total_seq_rxns)) {
   #initialize dataframes
@@ -384,11 +426,12 @@ for (i in row.names(Total_seq_rxns)) {
       filter(DNASample == Sample_name) %>%
       filter(Locus == Locus_name) %>%
       group_by(across(c(-SangerSeqNo))) %>%
-      summarize(no_observations = n()) %>%
-      arrange(desc(no_observations))
+      summarize(no_observations = n(), .group="drop_last") %>%
+      arrange(desc(no_observations))%>%
+      ungroup()
     
     #remove rows where site is undetermined or possibly mutated (the latter could reflect poor sequence quality too) 
-    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "wt/mut" & get({{Site_name}}) != "mut/mut" & get({{Site_name}}) != "GT/mut")
+    Subset_working_2 = Subset_working %>% filter(get({{Site_name}}) != "undetermined" & get({{Site_name}}) != "wt/mut" & get({{Site_name}}) != "mut" & get({{Site_name}}) != "GT/mut")
     
     #if all are undetermined or mutated make this the final outcome
     outcomes=pull(Subset_working_2, Site_name)
@@ -398,15 +441,15 @@ for (i in row.names(Total_seq_rxns)) {
         if ("GT/mut" %in% outcomes_unmut){#conflict
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined") 
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }else {#assume mut/mut was seq error or 1 allele had been missed
+        }else {#assume mut was seq error or 1 allele had been missed
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/mut") 
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         } 
       }else if ("GT/mut" %in% outcomes_unmut){
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/mut")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
-        }else if ("mut/mut" %in% outcomes_unmut){
-          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "mut/mut")
+        }else if ("mut" %in% outcomes_unmut){
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "mut")
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }else{
           Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
@@ -414,26 +457,26 @@ for (i in row.names(Total_seq_rxns)) {
         }
     #if not undetermined or mutated, the specific combination of different outcomes determines the final outcome
       }else if (nrow(Subset_working_2) > 0){
-        if ("wt/wt" %in% outcomes){
-          if ("GT/GT" %in% outcomes){
+        if ("wt" %in% outcomes){
+          if ("GT" %in% outcomes){
             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "undetermined")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else if ("GT/wt" %in% outcomes){
-            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt")  #assume 1 allele was missed in wt/wt case
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt")  #assume 1 allele was missed in wt case
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
-             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt/wt")
+             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else if ("GT/GT" %in% outcomes){ #if GT/GT but not wt/wt
+        }else if ("GT" %in% outcomes){ #if GT but not wt
           if ("GT/wt" %in% outcomes){
-          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt") #assume one allele was missed in the GT/GT case
+          Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt") #assume one allele was missed in the GT case
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }else{
-            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/GT")  
+            Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT")  
           names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
           }
-        }else{#if GT/wt but not wt/wt and not GT/GT
+        }else{#if GT/wt but not wt and not GT
             Consensus = data.frame(DNASample = {{Sample_name}}, Locus = {{Locus_name}}, temp_j = "GT/wt")
             names(Consensus)[names(Consensus) == "temp_j"] <- Site_name
         }
@@ -466,9 +509,9 @@ writeData(work_book, sheet = 2, Total_trans_primer)
 addWorksheet(work_book, "Data_summary")
 writeData(work_book, sheet = 3, Total_ultimate_parents)
 
-saveWorkbook(work_book, file = paste0(output_dir, "SangerSeqAnalysis.xlsx"), overwrite=TRUE)
+saveWorkbook(work_book, file = paste0(output_dir, "SangerSeqAnalysis_", as.integer(Sys.time()), ".xlsx"), overwrite=TRUE)
 
-
+message(paste0("Analysis completed"))
   
   
 ```  
@@ -620,7 +663,7 @@ ggsave(file=paste0(output_dir, "main_stackedbar.png"), plot=plt, width=14, heigh
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
   pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>%
   filter(Genotype=="?" | is.na(T2))%>%
-  filter(DNASample != "38_1" & DNASample != "38_2")%>%
+  filter(DNASample != "38_1" & DNASample != "38_2" & DNASample != "w_1_2" & DNASample != "w_1_4"  & DNASample != "w_2_3" & DNASample != "w_2_4" & DNASample != "w_2_12" & DNASample != "w_3_16" & DNASample != "229_1_22_1_1_to_1" & DNASample != "229_1_22_1_1_to_2" & DNASample != "229_1_22_1_2_to_1") %>%
   filter(Locus == "PPO_endo") %>%
   mutate(x_pos = case_when(Site == "Site_1" ~ 1,
                            Site == "Site_2" ~ 2,
@@ -752,8 +795,8 @@ ggsave(file=paste0(output_dir, "main_stackedbar_sup.png"), width=15, height=15, 
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
   pivot_longer(cols = c(Site_1, Site_2, Site_3, Site_4, Site_5, Site_6), names_to = "Site")%>% 
   filter(Genotype!="?")%>%
-  filter(!is.na(T2))%>%
   filter(Locus == "PPO_exo") %>%
+  filter(DNASample == "23_1" | DNASample == "71_2" | DNASample == "47_1" | DNASample == "6_1" | DNASample == "51_1" | DNASample == "66_3" | DNASample == "69_2" | DNASample == "69_3" | DNASample == "w_1_2" | DNASample == "w_1_4" | DNASample == "w_2_3" | DNASample == "w_2_4" | DNASample == "w_2_12" | DNASample == "w_3_16")%>% #note, maybe 66-3 and 51-1 need to be removed
   mutate(x_pos = case_when(Site == "Site_1" ~ 1,
                            Site == "Site_2" ~ 2,
                            Site == "Site_3" ~ 3,
@@ -862,7 +905,7 @@ plt=ggplot(data=alldata_combined3, aes(fill=fill_colour), colour="black", linewi
   scale_color_manual(name="", breaks=c("wt", "teb"), labels=c(tebwt, tebmut), values=c("black", "red"))+
   scale_x_continuous(breaks=c(1:no_sites), labels=c(1:no_sites))+
   labs(x="Site", y="", fill="", shape="")+
-  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+
+  scale_shape_identity(guide="legend", breaks=shape_df$shape, labels=shape_df$label)+ #probably not required anymore
     theme(panel.border = element_blank(), 
         panel.grid.major = element_blank(), 
         panel.grid.minor = element_blank(), 
@@ -889,30 +932,33 @@ ggsave(file=paste0(output_dir, "ectopicGT_stackedbar.png"), plot=plt, width=14, 
 
 #gene conversion tract length figure
 ```{r}
-#start with site 4. check whether GT/wt or GT/GT.
+#start with site 4. check whether GT/wt or GT.
 #then check how far the same color continues in one direction, and in the other direction.
-#do not use rows with wt/mut, wt/wt, gt/mut, mut/mut, undetermined
+#do not use rows with wt/mut, wt, gt/mut, mut, undetermined
 #display the lengths per F2, per genotype.
 
 alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_summary") %>%
   #first get rid of samples where some information is unclear
   filter(Site_1 != "undetermined" & Site_2 != "undetermined" & Site_3 != "undetermined" & Site_4 != "undetermined" & Site_5 != "undetermined" & Site_6 != "undetermined" )%>%
   #then get rid of the ones without ATG at codon 426
-  filter(Site_4!="wt/wt")%>%
+  filter(Site_4!="wt")%>%
   #only look at endogenous locus
   filter(Locus=="PPO_endo")%>%
+  #filter away the controls and the direct GT samples
+  filter(Genotype!="?")%>%
+  filter(!is.na(T2))%>%
   #simplify the calling
-  mutate(Site_1 = case_when(Site_1 == "GT/GT" | Site_1 == "GT/wt" | Site_1== "GT/mut" ~ TRUE,
+  mutate(Site_1 = case_when(Site_1 == "GT" | Site_1 == "GT/wt" | Site_1== "GT/mut" ~ TRUE,
                             TRUE ~ FALSE))%>%
-  mutate(Site_2 = case_when(Site_2 == "GT/GT" | Site_2 == "GT/wt" | Site_2== "GT/mut" ~ TRUE,
+  mutate(Site_2 = case_when(Site_2 == "GT" | Site_2 == "GT/wt" | Site_2== "GT/mut" ~ TRUE,
                             TRUE ~ FALSE))%>%
-  mutate(Site_3 = case_when(Site_3 == "GT/GT" | Site_3 == "GT/wt" | Site_3== "GT/mut" ~ TRUE,
+  mutate(Site_3 = case_when(Site_3 == "GT" | Site_3 == "GT/wt" | Site_3== "GT/mut" ~ TRUE,
                             TRUE ~ FALSE))%>%
-  mutate(Site_4 = case_when(Site_4 == "GT/GT" | Site_4 == "GT/wt" | Site_4== "GT/mut" ~ TRUE,
+  mutate(Site_4 = case_when(Site_4 == "GT" | Site_4 == "GT/wt" | Site_4== "GT/mut" ~ TRUE,
                             TRUE ~ FALSE))%>%
-  mutate(Site_5 = case_when(Site_5 == "GT/GT" | Site_5 == "GT/wt" | Site_5== "GT/mut" ~ TRUE,
+  mutate(Site_5 = case_when(Site_5 == "GT" | Site_5 == "GT/wt" | Site_5== "GT/mut" ~ TRUE,
                             TRUE ~ FALSE))%>%
-  mutate(Site_6 = case_when(Site_6 == "GT/GT" | Site_6 == "GT/wt" | Site_6== "GT/mut" ~ TRUE,
+  mutate(Site_6 = case_when(Site_6 == "GT" | Site_6 == "GT/wt" | Site_6== "GT/mut" ~ TRUE,
                             TRUE ~ FALSE))%>%
   mutate(uplen = 99999999,
          downlen = 99999999)
@@ -1034,6 +1080,96 @@ wilcox.exact(data_figure_combined$totallen ~ data_figure_combined$Genotype, pair
 median(data_figure_teb$totallen)
 median(data_figure_wt$totallen)
 
+```
+#amplitude ratio figure
+```{r}
+#note that several things in this chunk are hard-coded
+
+alldata=read.xlsx(paste0(output_dir, "SangerSeqAnalysis.xlsx"), sheet="Data_detailed") %>%
+  filter(PrimerName == "LZ401" | PrimerName == "LZ402",
+         Name == "Site_4",
+         Genotype != "undetermined") %>% 
+  complete(DNASample, Locus) %>%
+  mutate(sample_group=case_when(DNASample == "49_2" | DNASample == "55_1" | DNASample == "75_3" | DNASample == "69_3" | DNASample == "22_1" ~ 1,
+                                DNASample == "47_1" | DNASample == "71_2" | DNASample == "23_1"  ~ 2,
+                                DNASample == "6_1" |  DNASample == "51_1" | DNASample == "66_3"| DNASample == "69_2" ~ 3,
+                                DNASample =="w_1_2"| DNASample =="w_1_4"| DNASample =="w_2_3"| DNASample =="w_2_4"| DNASample =="w_2_12"| DNASample =="w_3_16" ~4,
+                                DNASample == "229_1_22_1_2_to_1" | DNASample == "229_1_22_1_1_to_1" | DNASample == "229_1_22_1_1_to_2" ~ 5,
+                                TRUE ~ 0))%>%
+  filter(sample_group != 0)%>%
+  mutate(DNASample = case_when(DNASample == "229_1_22_1_2_to_1" ~ "1:2",
+                               DNASample == "229_1_22_1_1_to_1" ~ "1:1",
+                               DNASample == "229_1_22_1_1_to_2" ~ "2:1",
+                               TRUE~ DNASample))%>%
+  mutate(Locus = case_when(Locus == "PPO_endo" ~ "Endo PPO",
+                           Locus == "PPO_exo" ~ "NTGT",
+                           Locus == "PPO_endoexomix" ~ "Endo PPO + NTGT",
+                           TRUE~ "other"))
+
+alldata_samples = alldata %>% select(DNASample, sample_group) %>% unique() %>% arrange(sample_group)
+sample_number=length(alldata_samples$DNASample)
+alldata_samples[,"xpos"]= c(1:sample_number)
+
+data_figure = left_join(alldata, alldata_samples) 
+data_mean = data_figure %>% group_by(DNASample, Locus, xpos, sample_group) %>% summarize(MeanAmpRatio = mean(AmpRatio, na.rm=TRUE))
+#hard-coding axis labels and label positions
+data_annotation = tibble(annotation = c("TGT", "NTGT", "TGT & NTGT", "NTGT, direct GT", "Set ratio controls"),
+                         xpos = c(3, 7, 10.5, 15.5, 20),
+                         MeanAmpRatio = rep(-0.5,5),
+                         Locus = rep("NTGT",5))
+data_notfound = data_figure %>% filter(is.na(Genotype))
+
+data_1_to_2 = data_mean %>% filter(DNASample == "1:2")
+data_1_to_1 = data_mean %>% filter(DNASample == "1:1")
+data_2_to_1 = data_mean %>% filter(DNASample == "2:1")
+
+
+plt = ggplot(data=data_figure)+
+  #draw the lines indicating 1:2, 1:1, and 2:1 ratios
+  geom_segment(data=data_1_to_2, aes(x=0.5, xend=sample_number+0.5, y=MeanAmpRatio, yend=MeanAmpRatio), linetype="solid", colour="grey80", linewidth=line.thick*2)+
+  geom_text(data=data_1_to_2, aes(x=0, y=MeanAmpRatio, label="1:2"), size= geom.text.size, hjust="left", family="Verdana")+
+  geom_segment(data=data_1_to_1, aes(x=0.5, xend=sample_number+0.5, y=MeanAmpRatio, yend=MeanAmpRatio), linetype="solid", colour="grey80", linewidth=line.thick*2)+
+  geom_text(data=data_1_to_1, aes(x=0, y=MeanAmpRatio, label="1:1"), size= geom.text.size, hjust="left", family="Verdana")+
+  geom_segment(data=data_2_to_1, aes(x=0.5, xend=sample_number+0.5, y=MeanAmpRatio, yend=MeanAmpRatio), linetype="solid", colour="grey80", linewidth=line.thick*2)+
+  geom_text(data=data_2_to_1, aes(x=0, y=MeanAmpRatio, label="2:1"), size= geom.text.size, hjust="left", family="Verdana")+
+  #draw the data points
+  geom_quasirandom(aes(y=AmpRatio, x=xpos), method="frowney", varwidth=TRUE, width=0.2, size=1)+ 
+  #draw the averages
+  geom_point(data= data_mean, aes(y=MeanAmpRatio, x=xpos), shape=3, colour="red")+
+  facet_grid(rows=vars(Locus))+
+  labs(x="Sample", y="Peak amplitude ratio (GT:WT)")+
+  #annotation under the x-axis
+  geom_text(data=data_annotation, aes(x=xpos, y=MeanAmpRatio, label=annotation), size= geom.text.size, family="Verdana")+
+  geom_segment(x=1, xend=5, y=-0.4, yend=-0.4, linetype="solid", colour="black", linewidth=line.thick)+
+  geom_segment(x=6, xend=8, y=-0.4, yend=-0.4, linetype="solid", colour="black", linewidth=line.thick)+
+  geom_segment(x=9, xend=12, y=-0.4, yend=-0.4, linetype="solid", colour="black", linewidth=line.thick)+
+  geom_segment(x=13, xend=18, y=-0.4, yend=-0.4, linetype="solid", colour="black", linewidth=line.thick)+
+  geom_segment(x=19, xend=21, y=-0.4, yend=-0.4, linetype="solid", colour="black", linewidth=line.thick)+
+  #write a label for those reactions that did not result in a product
+  geom_text(data=data_notfound, aes(x=xpos, y=0.5, label="X"), size= geom.text.size, family="Verdana")+
+  theme(
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill="white", colour="black", linewidth=line.thick*2), 
+        text = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.text.y = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.text.x = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.title.x = element_text(family="Verdana", colour="black", size=theme.size),
+        axis.ticks = element_line(linewidth=line.thick*2, colour="black"),
+        strip.text = element_markdown(family="Verdana", size=theme.size),
+        strip.background = element_blank(),
+        legend.position = "right",
+        legend.justification = "left",
+        legend.direction = "vertical",
+        legend.text = element_markdown(family="Verdana", size=theme.size))+
+  scale_y_continuous(breaks=c(0, 1.0), labels=c("0:1", "1:0"))+
+  scale_x_continuous(breaks=c(1:sample_number), labels=alldata_samples$DNASample, expand=c(0, 0))+
+  coord_cartesian(xlim=c(0.5, sample_number+0.5), ylim=c(0, 1), clip="off")+
+  theme(plot.margin = unit(c(1,1,3,1), "lines"))
+  
+plt
+
+ggsave(file=paste0(output_dir, "amplitude_beeswarm.png"), width=24, height=15, units = "cm", dpi = "print")
 ```
 
 
