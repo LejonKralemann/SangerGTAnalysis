@@ -1,14 +1,27 @@
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Background
+About
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+This program is written for the consistent and unbiased analysis of multipeak sanger sequencing data related to gene targeting experiments.
+
+In a gene targeting experiment an endogenous gene is cleaved with an enzyme, usually Cas, in order to trigger DSB repair. A repair template is provided to the cell,
+which has the sequence of the gene, plus some polymorphisms that you want to introduce into the gene. When the DSB is repaired via homologous recombination, it may use the supplied template, resulting in a repair product that includes (some of) the polymorphisms included in the template. 
+This may only happen to one of the alleles, which causes double peaks in sanger sequencing chromatograms. 
+
+This program deconvolutes the chromatograms (via use of the sangerseqR package), and reports on the status of the sequence at different sites (wt, GT/wt, or GT).
+
+It summarizes data from different sanger sequencing reactions with different primers, and it also performs a peak amplitude analysis to establish in what ratio wt and GT alleles occur. 
+
+The data is written to an excel file, and is also visualized in several figures.
 
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Running
 ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-* Create an input and output folder and adjust the paths in the first code chunk
-* Put the .ab1 files in the input folder, and also include a metadata .xlsx file
+1) Create an input and output folder and adjust the paths in the first code chunk
+2) Put the .ab1 files in the input folder, and also include a metadata file called "SangerAnalysisInput.xlsx"
+3) Run the program
 
-This metadata file needs to contain the following information:
+The aformentioned metadata file needs to contain the following information:
 
 Sheet "sangerseqno_dnasample" 
 	with column "SangerSeqNo" containing the name of the ab1 files, without the extention
